@@ -1,8 +1,8 @@
 #include once "SDL2/SDL.bi"
 
 #define FULLSCREEN 1
-#define SCREEN_X   352
-#define SCREEN_Y   198
+#define SCREEN_X   1920'352'1920'352
+#define SCREEN_Y   1080'198'1080'198
 #define HALF_X     SCREEN_X \ 2
 #define HALF_Y     SCREEN_Y \ 2
 #define TO_RAD     0.0174532925
@@ -12,7 +12,9 @@
 #define MAP_WIDTH    1024
 #define MAP_HEIGHT   1024
 #define HEIGHT_RATIO 127*(SCREEN_Y/300)
-#define MAX_DISTANCE 3000' 300
+#define PREC         (2^11)
+#define PREC_SHIFT   11
+#define MAX_DISTANCE 4096*PREC' 300
 
 '// TIMER FUNCTIONS  ===================================================
 declare function UpdateSpeed (save_time as integer=1) as double
@@ -62,6 +64,8 @@ declare function SDL_CreateTargetTextureFromSurface( renderer as SDL_RENDERER pt
 declare function red(argb32 as integer) as integer
 declare function grn(argb32 as integer) as integer
 declare function blu(argb32 as integer) as integer
+declare function rgbAdd(colr as integer, amount as integer, keepHue as integer = 0) as integer
+declare function rgbMix(colr0 as integer, colr1 as integer, f1 as double = 1, f2 as double = 1) as integer
 '// END GRAPHICS FUNCTIONS  ============================================
 
 '// FONT HANDLER  ======================================================
@@ -175,18 +179,24 @@ type Caster
     ray_offset   as Vector
 end type
 
+declare sub rayDefault(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+
 type FlatMap
 private:
     _w as integer
     _h as integer
-    dim   _walls(1024*1024) as byte
-    dim _heights(1024*1024) as short
-    dim  _colors(1024*1024) as integer
+    dim   _walls(MAP_WIDTH*MAP_HEIGHT) as byte
+    dim _heights(MAP_WIDTH*MAP_HEIGHT) as short
+    dim  _colors(MAP_WIDTH*MAP_HEIGHT) as integer
+    dim _callbacks(MAP_WIDTH*MAP_HEIGHT) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    dim _data(MAP_WIDTH*MAP_HEIGHT*2) as integer
 public:
     declare constructor(w as integer, h as integer)
     declare function walls(x as integer, y as integer) as byte
     declare function heights(x as integer, y as integer) as short
     declare function colors(x as integer, y as integer) as integer
+    declare function callbacks(x as integer, y as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    declare function datas(x as integer, y as integer, z as integer=0) as integer
     declare property w() as integer
     declare property w(new_w as integer)
     declare property h() as integer
@@ -194,13 +204,19 @@ public:
     declare function setWall(x as integer, y as integer, new_w as integer) as FlatMap ptr
     declare function setHeight(x as integer, y as integer, new_h as integer) as FlatMap ptr
     declare function setColor(x as integer, y as integer, new_c as integer) as FlatMap ptr
+    declare function setCallback(x as integer, y as integer, s as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)) as FlatMap ptr
+    declare function setData(x as integer, y as integer, z as integer, value as integer) as FlatMap ptr
     declare function getWallAvg(x as integer, y as integer, size as integer) as integer
     declare function getHeightAvg(x as integer, y as integer, size as integer) as integer
     declare function getColorAvg(x as integer, y as integer, size as integer) as integer
+    declare function getCallbackAvg(x as integer, y as integer, size as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    declare function getDataAvg(x as integer, y as integer, z as integer, size as integer) as integer
 end type
 constructor FlatMap(map_w as integer, map_h as integer)
     this._w = map_w
     this._h = map_h
+    dim i as integer
+    for i = 0 to MAP_WIDTH*MAP_HEIGHT-1: this._callbacks(i) = @rayDefault: next i
     'redim this._walls(map_w, map_h)
     'redim this._heights(map_w, map_h)
     'redim this._colors(map_w, map_h)
@@ -222,6 +238,20 @@ end function
 function FlatMap.colors(x as integer, y as integer) as integer
     if x >= 0 and x < this._w and y >= 0 and y < this._h then
         return this._colors(x+((this._h-1-y) shl 10))
+    else
+        return 0
+    end if
+end function
+function FlatMap.callbacks(x as integer, y as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        return this._callbacks(x+((this._h-1-y) shl 10))
+    else
+        return @rayDefault
+    end if
+end function
+function FlatMap.datas(x as integer, y as integer, z as integer=0) as integer
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        return this._data(x+((this._h-1-y) shl 10)+(z shl 20))
     else
         return 0
     end if
@@ -256,9 +286,22 @@ function Flatmap.setColor(x as integer, y as integer, new_c as integer) as FlatM
     end if
     return @this
 end function
+function Flatmap.setCallback(x as integer, y as integer, s as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)) as FlatMap ptr
+     if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        this._callbacks((this._h-1-y) shl 10) = s
+    end if
+    return @this
+end function
+function Flatmap.setData(x as integer, y as integer, z as integer, value as integer) as FlatMap ptr
+     if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        this._data(x+((this._h-1-y) shl 10)+(z shl 20)) = value
+    end if
+    return @this
+end function
 function FlatMap.getWallAvg(x as integer, y as integer, size as integer) as integer
     dim mx as integer, my as integer
     dim sum as double
+    dim max as double
     for my = y to y+size-1
         for mx = x to x+size-1
             sum += this.walls(mx, my)
@@ -269,28 +312,131 @@ function FlatMap.getWallAvg(x as integer, y as integer, size as integer) as inte
 end function
 function FlatMap.getHeightAvg(x as integer, y as integer, size as integer) as integer
     dim mx as integer, my as integer
-    dim sum as double
+    'dim sum as double
+    dim max as double
+    max = -99999
     for my = y to y+size-1
         for mx = x to x+size-1
-            sum += this.heights(mx, my)
+            'sum += this.heights(mx, my)
+            if this.heights(mx, my) > max then
+                max = this.heights(mx, my)
+            end if
         next mx
     next my
-    size *= size
-    return sum / size
+    'size *= size
+    'return sum / size
+    return max
 end function
 function FlatMap.getColorAvg(x as integer, y as integer, size as integer) as integer
     dim mx as integer, my as integer
-    dim r as integer, g as integer, b as integer
+    dim colr as integer
+    dim max as double
+    max = -99999
     for my = y to y+size-1
         for mx = x to x+size-1
-            r += ((this.colors(mx, my) shr 16) and &hff)
-            g += ((this.colors(mx, my) shr  8) and &hff)
-            b += (this.colors(mx, my) and &hff)
+            if this.heights(mx, my) > max then
+                max = this.heights(mx, my)
+                colr = this.colors(mx, my)
+            end if
         next mx
     next my
-    size *= size
-    return rgb(r / size, g / size, b / size)
+    return colr
+    'dim r as integer, g as integer, b as integer
+    'for my = y to y+size-1
+    '    for mx = x to x+size-1
+    '        r += ((this.colors(mx, my) shr 16) and &hff)
+    '        g += ((this.colors(mx, my) shr  8) and &hff)
+    '        b += (this.colors(mx, my) and &hff)
+    '    next mx
+    'next my
+    'size *= size
+    'return rgb(r / size, g / size, b / size)
 end function
+function FlatMap.getCallbackAvg(x as integer, y as integer, size as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    dim mx as integer, my as integer
+    'dim sum as double
+    dim s as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    dim max as double
+    max = -99999
+    s = 0
+    for my = y to y+size-1
+        for mx = x to x+size-1
+            'sum += this.heights(mx, my)
+            if this.heights(mx, my) > max then
+                max = this.heights(mx, my)
+                s = this.callbacks(mx, my)
+            end if
+        next mx
+    next my
+    'size *= size
+    'return sum / size
+    return s
+end function
+function FlatMap.getDataAvg(x as integer, y as integer, z as integer, size as integer) as integer
+    dim mx as integer, my as integer
+    'dim sum as double
+    dim dat as integer
+    dim max as double
+    max = -99999
+    for my = y to y+size-1
+        for mx = x to x+size-1
+            'sum += this.heights(mx, my)
+            if this.heights(mx, my) > max then
+                max = this.heights(mx, my)
+                dat = this.datas(mx, my, z)
+            end if
+        next mx
+    next my
+    'size *= size
+    'return sum / size
+    return dat
+end function
+
+type BspNode
+private:
+    _normal as Vector
+    _behind as BspNode ptr
+    _front as BspNode ptr
+    _data as any ptr
+public:
+    declare constructor()
+    declare function getNormal() as Vector ptr
+    declare function getBehind() as BspNode ptr
+    declare function getFront() as BspNode ptr
+    declare function getData() as any ptr
+    declare function setData(p as any ptr) as BspNode ptr
+end type
+
+constructor BspNode
+    this._behind = 0
+    this._front = 0
+    this._data = 0
+end constructor
+function BspNode.getNormal() as Vector ptr
+    return @this._normal
+end function
+function BspNode.getBehind() as BspNode ptr
+    return this._behind
+end function
+function BspNode.getFront() as BspNode ptr
+    return this._front
+end function
+function BspNode.getData() as any ptr
+    return this._data
+end function
+function BspNode.setData(p as any ptr) as BspNode ptr
+    this._data = p
+    return @this
+end function
+
+type BspTree
+private:
+    _node_start as BspNode
+    _nodes(4096) as BspNode
+public:
+    declare function addBehind(normal as Vector) as BspTree ptr
+    declare function addFront(normal as Vector) as BspTree ptr
+end type
 
 declare sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, c as integer, a as integer = 0)
 declare function vectorFromAngle(a as double) as Vector
@@ -349,8 +495,8 @@ sub main()
     dim f as double
     dim a as double
     
-    px = 63.5
-    py = 63.5
+    px = MAP_WIDTH * 0.5 + 0.5
+    py = MAP_HEIGHT * 0.5 + 0.5
     pa = 0
     ph = 1
     
@@ -358,21 +504,21 @@ sub main()
     dim vr as Vector
     dim vray as Vector
     
-    dim dx as double, dy as double
-    dim ax as double, ay as double
+    dim dx as integer, dy as integer
+    dim ax as integer, ay as integer
     dim ex as integer, ey as integer
-    dim x_dx as double, x_dy as double
-    dim y_dx as double, y_dy as double
-    dim x_ax as double, x_ay as double
-    dim y_ax as double, y_ay as double
+    dim x_dx as integer, x_dy as integer
+    dim y_dx as integer, y_dy as integer
+    dim x_ax as integer, x_ay as integer
+    dim y_ax as integer, y_ay as integer
     dim x_ex as integer, x_ey as integer
     dim y_ex as integer, y_ey as integer
     dim lx as integer, ly as integer
     dim xHit as integer, yHit as integer
-    dim xDist as double, yDist as double
-    dim dist as double
+    dim xDist as integer, yDist as integer
+    dim dist as integer
     dim dc as double
-    dim sliceSize as double
+    dim sliceSize as single
     
     dim event as SDL_Event
 	dim keys as const ubyte ptr
@@ -382,6 +528,7 @@ sub main()
     dim fps as integer
     dim fps_count as integer
     dim fps_timer as double
+    dim seconds as double
     
     dim top as integer
     dim bottom as integer
@@ -389,6 +536,7 @@ sub main()
     dim colorFloor as integer
     dim colorWall as integer
     dim colorSky as integer
+    dim colorWater as integer
     
     dim fov as double: fov = 1
     
@@ -400,18 +548,28 @@ sub main()
     colorFloor = &h8db27c
     colorWall  = &hffe4d8
     colorSky   = &hbec2ff
-    
+    colorWater = &h5c73ab
+
     dim nph as double
     midline += (HALF_Y/2)
+    
+    dim rayCallback as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
     
     dim walkingSpeed as double = 4.0
     dim flyingSpeed as double = 30
     'dim pitch as double
     dim mode as integer = 1
+    dim strafeAngle as double
+    dim strafeValue as double
+    
+    dim texture as SDL_Texture ptr
+    texture = SDL_CreateTexture(gfxRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SCREEN_X, SCREEN_Y)
     
     UpdateSpeed()
+    seconds = 0
     do
         delta = UpdateSpeed()
+        seconds += delta
         
         fps_count += 1
         fps_timer += delta
@@ -427,22 +585,22 @@ sub main()
 				return
 			end select
 		wend
-		keys = SDL_GetKeyboardState(0)
+        
+        keys = SDL_GetKeyboardState(0)
         mousestate = SDL_GetRelativeMouseState(@mx, @my)
         
         pa -= mx*0.20
         
         dim ha as double
-        ha = midline-HALF_Y
         
-        midline -= my
+        midline -= my*(SCREEN_Y/300)
         if midline < -HALF_Y then midline = -HALF_Y
         'if midline > HALF_Y*10 then midline = HALF_Y*10
-        fov = 1+abs(midline-HALF_Y)*0.00125
+        fov = 1+abs(midline-HALF_Y)*0.00125*(300/SCREEN_Y)
         
         map = @highres
         
-        ha = midline-HALF_Y
+        ha = (midline-HALF_Y)*(300/SCREEN_Y)
         
         static dv as double
         dim speed as double
@@ -458,12 +616,15 @@ sub main()
         if keys[SDL_SCANCODE_RIGHT] then
             pa -= 12
         end if
+        
+        if keys[SDL_SCANCODE_LCTRL] then speed *= 1.5
+        
         if keys[SDL_SCANCODE_A] then
             
             vf = vectorFromAngle(pa)
             vf = vectorToRight(vf)
-            vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-            vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
+            vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+            vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
             px -= vf.x
             py -= vf.y
             
@@ -481,8 +642,8 @@ sub main()
         
             vf = vectorFromAngle(pa)
             vf = vectorToRight(vf)
-            vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-            vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
+            vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+            vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
             px += vf.x
             py += vf.y
             
@@ -503,14 +664,14 @@ sub main()
                 vf.z = ha*0.3*.02625
                 vf   = vectorToUnit(vf)
                 
-                px += vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-                py += vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-                ph += vf.z * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
+                px += vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+                py += vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+                ph += vf.z * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
             case 2
                 vf   = vectorFromAngle(pa)
                 vf   = vectorToUnit(vf)
-                vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-                vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta 
+                vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+                vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta 
                 px += vf.x
                 py += vf.y
                 
@@ -521,19 +682,21 @@ sub main()
                 'elseif (dv = 0) and ((nph-ph) < 0) and ((nph-ph) > -0.325) then
                 '    ph = nph
                 end if
+                
+                strafeAngle += delta*600*iif(keys[SDL_SCANCODE_LCTRL], 2, 1)
             end select
         end if
         if keys[SDL_SCANCODE_DOWN] or keys[SDL_SCANCODE_S] then
             select case mode
             case 1
                 vf = vectorFromAngle(pa)
-                px -= vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-                py -= vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
+                px -= vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+                py -= vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
             case 2
                 vf   = vectorFromAngle(pa)
                 vf   = vectorToUnit(vf)
-                vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta
-                vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.75, 1) * delta 
+                vf.x = vf.x * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta
+                vf.y = vf.y * speed * iif(keys[SDL_SCANCODE_LCTRL], 1.5, 1) * delta 
                 px -= vf.x
                 py -= vf.y
                 
@@ -551,7 +714,7 @@ sub main()
                 ph += flyingSpeed * delta
             else
                 'dv = -0.3333
-                dv = -0.5
+                dv = -10
             end if
         end if
         if keys[SDL_SCANCODE_LSHIFT] then
@@ -580,8 +743,10 @@ sub main()
         north.x = 0: north.y = 1
         
         if mode = 2 then
-            dv += delta
-            ph -= dv
+            dim g as double
+            g = 30
+            dv += g*delta
+            ph -= dv*delta
         
             nph = map->heights(int(px), int(py))*0.01+1.5
         
@@ -591,10 +756,11 @@ sub main()
             end if
         end if
         
+        strafeValue = cos(strafeAngle*TO_RAD)*iif(keys[SDL_SCANCODE_LCTRL], 0.05, 0.05)
+        
         dim colr as integer
-        dim resAdjust as double
-        dim xDistMax as double, yDistMax as double
-        dim distMax as double
+        dim xDistMax as integer, yDistMax as integer
+        dim distMax as integer
         dim i as integer
         
         '// DRAW SKY  ==================================================
@@ -618,48 +784,127 @@ sub main()
         '        drawLine 0, y, SCREEN_X-1, y, rgb(rr, g, b)
         '    next y
         'end if
-        SDL_SetRenderDrawColor(gfxRenderer, r, g, b, &hff)
-        SDL_RenderClear(gfxRenderer)
+        'SDL_SetRenderDrawColor(gfxRenderer, r, g, b, &hff)
+        'SDL_RenderClear(gfxRenderer)
         
+        dim pixels as integer ptr
+        dim pixelNow as integer ptr
+        dim pitch as integer
+        dim xPix as integer, yPix as integer
+        dim pt as integer
+        
+        SDL_LockTexture(texture, null, @pixels, @pitch)
+        pitch = (pitch shr 2)
+        
+        xPix = 0: yPix = 0
+        pt = pitch-SCREEN_X
+        pixelNow = pixels
+        colr = rgb(r, g, b)
+        
+        dim xStop as integer ptr
+        dim yStop as integer ptr
+        
+        dim sk as integer
+        sk = (midline-HALF_Y)
+        'if sk > 0 then sk = 0
+        colr = colorSky
+        if sk < 0 then
+            colr += &h010100*sk
+        end if
+        dim colstop as integer
+        colstop = colorSky-&h010100*12
+        
+        yStop = pixels+iif(sk >= 0, sk, 0)*pitch
+        while pixelNow < yStop
+            xStop = pixelNow + SCREEN_X
+            while pixelNow < xStop: *pixelNow = colr: pixelNow += 1: wend
+            pixelNow += pt
+        wend
+        yStop = pixels+SCREEN_Y*pitch
+        while pixelNow < yStop
+            xStop = pixelNow + SCREEN_X
+            while pixelNow < xStop: *pixelNow = colr: pixelNow += 1: wend
+            pixelNow += pt
+            colr -= &h010100
+            if colr < colstop then colr = colstop
+        wend
+        pixelNow = pixels
+        
+        dim fx as double, fy as double, fo as double
+                
+        xPix = -1
         for f = 0 to SCREEN_X-1
-        
+            xPix += 1
             map = @highres
         
-            bottom = SCREEN_Y
+            bottom = SCREEN_Y-1
             
             '// EDGE-OF-MAP INTERSECTION ===============================
-            dx = iif(vray.x > 0, map->w-1-px, -px)
-            xDistMax = abs(dx/vray.x)
+            xDistMax = 0
+            yDistMax = 0
+            fx = 0: fy = 0
             
-            dy = iif(vray.y > 0, map->h-1-py, -py)
-            yDistMax = abs(dy/vray.y)
+            if px < 0 or px >= map->w then
+                fx += abs(iif(vray.x > 0, -px, MAP_WIDTH-px)/vray.x)
+            end if
+            
+            fx += abs(iif(vray.x > 0, map->w-1-px, -px)/vray.x)
+            
+            if fx > 524288 then fx = 524288
+            xDistMax = fx*PREC
+            
+            if py < 0 or py >= map->h then
+                fy += abs(iif(vray.y > 0, -py, MAP_HEIGHT-py)/vray.y)
+            end if
+            
+            fy += abs(iif(vray.y > 0, map->h-1-py, -py)/vray.y)
+            
+            if fy > 524288 then fy = 524288
+            yDistMax = fy*PREC
             
             distMax = iif(xDistMax < yDistMax, xDistMax, yDistMax)
             if distMax > MAX_DISTANCE then distMax = MAX_DISTANCE
             
-            
             '// CLOSEST INTERSECTION  ==================================
             xHit = 0
-            dx = iif(vray.x > 0, int(px+1)-px, int(px)-px)
-            dy = vray.y*abs(dx/vray.x)
+            if px >= 0 and px < map->w then
+                fx = iif(vray.x > 0, int(px+1)-px, int(px)-px)
+            else
+                fx = iif(vray.x > 0, -px, MAP_WIDTH-px)
+            end if
+            fy = vray.y*abs(fx/vray.x)
+            if fy >  524288 then fy =  524288
+            if fy < -524288 then fy = -524288
             ex = iif(vray.x >= 0, 0, -1)
             ey = 0
-            dx += px
-            dy += py
             
-            xDist = abs((dx-px)/vray.x)
+            fo = abs(fx/vray.x)
+            if fo > 524288 then fo = 524288
+            xDist = fo*PREC
+            
+            dx = (fx+px)*PREC
+            dy = (fy+py)*PREC
             
             x_dx = dx: x_dy = dy
             
             yHit = 0
-            dy = iif(vray.y > 0, int(py+1)-py, int(py)-py)
-            dx = vray.x*abs(dy/vray.y)
+            if py >= 0 and py < map->h then
+                fy = iif(vray.y > 0, int(py+1)-py, int(py)-py)
+            else
+                fy = iif(vray.y > 0, -py, MAP_HEIGHT-py)
+            end if
+            fx = vray.x*abs(fy/vray.y)
+            if fx >  524288 then fx =  524288
+            if fx < -524288 then fx = -524288
             ex = 0
             ey = iif(vray.y >= 0, 0, -1)
-            dy += py
-            dx += px
             
-            yDist = abs((dy-py)/vray.y)
+            fo = abs(fy/vray.y)
+            if fo > 524288 then fo = 524288
+            yDist = fo*PREC
+            
+            dy = (fy+py)*PREC
+            dx = (fx+px)*PREC
             
             y_dx = dx: y_dy = dy
             
@@ -672,41 +917,46 @@ sub main()
                 ey = y_ey: ex = y_ex
                 dist = yDist
             end if
-            lx = int(dx)+ex: ly = int(dy)+ey
+            lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
             
-            sliceSize = HEIGHT_RATIO / dist
+            sliceSize = (HEIGHT_RATIO shl PREC_SHIFT) / dist
             dim h as double
             h = map->heights(int(px), int(py))*0.01
-            top = midline+int(sliceSize*(ph-h))+1
+            top = midline+int(sliceSize*((ph-h)+strafeValue))+1
+            yPix = bottom
+            pixelNow = pixels+pitch*yPix+xPix
+            '// draw top
             if top <= bottom then
                 colr = map->colors(int(px), int(py))
-                drawLine f, top, f, bottom, colr, 0
+                if top < 0 then top = 0
+                while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                 bottom = top-1
             end if
+            '// draw side
             h = map->heights(lx, ly)*0.01
-            top = midline+int(sliceSize*(ph-h))+1
+            top = midline+int(sliceSize*((ph-h)+strafeValue))+1
             if top <= bottom then
                 colr = map->colors(lx, ly)
                 dc = iif(xDist > yDist, 10, -10)
-                drawLine f, top, f, bottom, colr, dc
+                if top < 0 then top = 0
+                while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                 bottom = top-1
             end if
             '// INTERSECTIONS UNTIL EDGE-OF-MAP/MAX-DISTANCE  ==========
-            dim x_di as double
-            dim y_di as double
+            dim x_di as integer
+            dim y_di as integer
             
-            x_ax = iif(vray.x >= 0, 1, -1)
-            x_ay = vray.y / abs(vray.x)
+            x_ax = iif(vray.x >= 0, 1, -1)*PREC
+            x_ay = (vray.y / abs(vray.x))*PREC
             x_ex = iif(vray.x >= 0, 0, -1)
             x_ey = 0
-            x_di = abs(1/vray.x)
+            x_di = abs(PREC/vray.x)
             
-            y_ay = iif(vray.y >= 0, 1, -1)
-            y_ax = vray.x / abs(vray.y)
+            y_ay = iif(vray.y >= 0, 1, -1)*PREC
+            y_ax = (vray.x / abs(vray.y))*PREC
             y_ey = iif(vray.y >= 0, 0, -1)
             y_ex = 0
-            y_di = abs(1/vray.y)
-            
+            y_di = abs(PREC/vray.y)
             
             dim wallR as integer, wallG as integer, wallB as integer
             dim skyR as integer, skyG as integer, skyB as integer
@@ -714,83 +964,27 @@ sub main()
             dim atmosphereFactor as double
             dim dc1 as double
             
-            dim map_w as integer = map->w
-            dim map_h as integer = map->h
-            dim map_x as integer
-            dim map_y as integer
-            
-            atmosphereFactor = 0.0033'/resAdjust
-            
-            dim resAdjust as double
-            resAdjust = 1
+            atmosphereFactor = 0.0026
             
             dim xAlign as integer, yAlign as integer
             dim switchedToMed as integer, switchedToLow as integer
             dim switchedToSub as integer
             
             switchedToMed = 0: switchedToLow = 0: switchedToSub = 0
+            dim switchCount as integer
+            dim nextDist as double
+            switchCount = 0: nextDist = 160*PREC'96'160'32'160
             
             do while dist < distMax
-                if (dist > 160) and (switchedToMed = 0) then
-                    map = @medres
-                    xAlign = 1: yAlign = 1
-                    x_dx *= 0.5: x_dy *= 0.5
-                    y_dx *= 0.5: y_dy *= 0.5
-                    x_di *= 2.0: y_di *= 2.0
-                    lx   *= 0.5: ly   *= 0.5
-                    switchedToMed = 1
-                end if
-                if (dist > 320) and (switchedToLow = 0) then
-                    map = @lowres
-                    xAlign = 1: yAlign = 1
-                    x_dx *= 0.5: x_dy *= 0.5
-                    y_dx *= 0.5: y_dy *= 0.5
-                    x_di *= 2.0: y_di *= 2.0
-                    lx   *= 0.5: ly   *= 0.5
-                    switchedToLow = 1
-                end if
-                if (dist > 480) and (switchedToSub = 0) then
-                    map = @subres
-                    xAlign = 1: yAlign = 1
-                    x_dx *= 0.5: x_dy *= 0.5
-                    y_dx *= 0.5: y_dy *= 0.5
-                    x_di *= 2.0: y_di *= 2.0
-                    lx   *= 0.5: ly   *= 0.5
-                    switchedToSub = 1
-                end if
                 
                 if xDist < yDist then
-                    if xAlign then
-                    
-                        xAlign = 0
-                        
-                        if int(x_dx)-x_dx <> 0 then
-                            x_dx  += x_ax*0.5: x_dy += x_ay*0.5
-                            xDist += x_di*0.5
-                        else
-                            x_dx  += x_ax: x_dy += x_ay
-                            xDist += x_di
-                        end if
-                    else
-                        x_dx  += x_ax: x_dy += x_ay
-                        xDist += x_di
-                    end if
+                    x_dx  += x_ax: x_dy += x_ay
+                    xDist += x_di
+                    'map->callbacks(x_dx, x_dy)(x_dx, y_dy, 0, 0)
                 else
-                    if yAlign then
-                        
-                        yAlign = 0
-                        
-                        if int(y_dy)-y_dy <> 0 then
-                            y_dy  += y_ay*0.5: y_dx += y_ax*0.5
-                            yDist += y_di*0.5
-                        else
-                            y_dy  += y_ay: y_dx += y_ax
-                            yDist += y_di
-                        end if
-                    else
-                        y_dy  += y_ay: y_dx += y_ax
-                        yDist += y_di
-                    end if
+                    y_dy  += y_ay: y_dx += y_ax
+                    yDist += y_di
+                    'map->callbacks(y_dx, y_dy)(0, 0, y_dx, y_dy)
                 end if
                 
                 if xDist < yDist then
@@ -803,35 +997,93 @@ sub main()
                     dist = yDist
                 end if
                 
-                if dist > distMax then dist = distMax
+                if dist > distMax then exit do
                 
-                sliceSize = HEIGHT_RATIO / dist
+                sliceSize = (HEIGHT_RATIO shl PREC_SHIFT) / dist
                 
-                top = midline+int(sliceSize*(ph-h))+1
+                '// draw top
+                top = midline+int(sliceSize*((ph-h)+strafeValue))+1
                 dc = 0
+                
                 if top <= bottom then
                 
+                    dim dat as integer
+                
                     colr = map->colors(lx, ly)
-                
-                    dc = dist*atmosphereFactor
-                    dc = dc*dc*dc*dc*dc
+                    dat = map->datas(lx, ly)
+                                    
+                    dc = (dist shr PREC_SHIFT)*atmosphereFactor
+                    dc = dc*dc*dc
                     dc1 = 1/(dc+1)
-                    wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
                     skyR  = (colorSky  shr 16) and 255: skyG  = (colorSky  shr 8) and 255: skyB  = (colorSky  and 255)
-                    colr = rgb((wallR+(skyR*dc))*dc1, (wallG+(skyG*dc))*dc1, (wallB+(skyB*dc))*dc1)
+                    if dat = 777 then
+                        dim add as integer
+                        add = 7-(int(((cos(lx+seconds*0.002)*TO_RAD)*(sin(seconds*0.002-ly)*TO_RAD)*3000000)) and 15)
+                        r = &h5c+add: g = &h53+add: b = &hdb+add
+                        wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+                        colr = rgb((r+wallR)*0.5, (g+wallG)*0.5, (b+wallB)*0.5)
+                        wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+                    else
+                        wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+                    end if
+                    r = (wallR+(skyR*dc))*dc1
+                    g = (wallG+(skyG*dc))*dc1
+                    b = (wallB+(skyB*dc))*dc1
+                    colr = rgb(r, g, b)
                 
-                    drawLine f, top, f, bottom, colr, 0
+                    'drawLine f, top, f, bottom, colr, 0
+                    if top < 0 then top = 0
+                    while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                     bottom = top-1
                 end if
                 
-                lx = int(dx)+ex: ly = int(dy)+ey
+                if (dist > nextDist) then
+                    switchCount += 1
+                    select case switchCount
+                    case 1
+                        map = @medres
+                        nextDist = 320*PREC'160'320'64'320
+                    case 2
+                        map = @lowres
+                        nextDist = 480*PREC'320'480'256'480
+                    case 3
+                        map = @subres
+                        nextDist = &h7fffffff
+                    end select
+                    xAlign = 1: yAlign = 1
+                    x_dx \= 2: x_dy \= 2
+                    y_dx \= 2: y_dy \= 2
+                    x_di *= 2: y_di *= 2
+                    lx   \= 2: ly   \= 2
+                    if x_dx-((x_dx shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
+                        x_dx  += x_ax\2: x_dy += x_ay\2
+                        xDist += x_di\2
+                    end if
+                    if y_dy-((y_dy shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
+                        y_dy  += y_ay\2: y_dx += y_ax\2
+                        yDist += y_di\2
+                    end if
+                    
+                     if xDist < yDist then
+                        dx = x_dx: dy = x_dy
+                        ex = x_ex: ey = x_ey
+                        dist = xDist
+                    else
+                        dy = y_dy: dx = y_dx
+                        ey = y_ey: ex = y_ex
+                        dist = yDist
+                    end if
+                end if
+                
+                '// draw side
+                lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
                 h = map->heights(lx, ly)*0.01
-                top = midline+int(sliceSize*(ph-h))+1
+                top = midline+int(sliceSize*((ph-h)+strafeValue))+1
                 if top <= bottom then
                     colr = map->colors(lx, ly)
                     if dc = 0 then
-                        dc = dist*atmosphereFactor
-                        dc = dc*dc*dc*dc*dc
+                        dc = (dist shr PREC_SHIFT)*atmosphereFactor
+                        dc = dc*dc*dc
                         dc1 = 1/(dc+1)
                     end if
                     ic = iif(xDist > yDist, 10, -10)
@@ -845,7 +1097,9 @@ sub main()
                     if wallG < 0 then wallG = 0
                     if wallB < 0 then wallB = 0
                     colr = rgb((wallR+(skyR*dc))*dc1, (wallG+(skyG*dc))*dc1, (wallB+(skyB*dc))*dc1)
-                    drawLine f, top, f, bottom, colr, 0
+                    'drawLine f, top, f, bottom, colr, 0
+                    if top < 0 then top = 0
+                    while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                     bottom = top-1
                 end if
                 
@@ -871,6 +1125,11 @@ sub main()
             '        drawLine f, y, f, bottom, rgb(r, g, b)
             '    end if
             'next y
+            if bottom > midline then
+                top = midline
+                if top < 0 then top = 0
+                'while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
+            end if
             
             vray.x += vr.x: vray.y += vr.y
             'if f = HALF_X then
@@ -878,6 +1137,10 @@ sub main()
             'end if
             
         next f
+        
+        SDL_UnlockTexture(texture)
+        SDL_RenderCopy(gfxRenderer, texture, null, null)
+        
         '// RAYCAST END  ===============================================
         game_font.writeText( "FPS: "+str(fps), 3, 3 )
         game_font.writeText( "X: "+str(int(px)), 3, 15 )
@@ -892,8 +1155,16 @@ sub main()
 
 end sub
 
-sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, c as integer, a as integer = 0)
+sub rayDefault(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
 
+end sub
+
+sub rayTeleport(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+
+end sub
+
+sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, c as integer, a as integer = 0)
+return
     dim r as integer, g as integer, b as integer
     
     r = (c shr 16) and &hff
@@ -977,41 +1248,103 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
         read objects(i, 1)
     next i
     
+    print "Generating world...";
+    
     'dim r as Vector
     dim r as integer
+    dim h as double = 3000
     v = vectorFromAngle(rnd(1)*360)
     for y = 0 to highres.h-1
         for x = 0 to highres.w-1
-            if (x = 0) or (y = 0) or (x = (highres.w-1)) or (y = (highres.h-1)) then
-                highres.setWall(x, y, 1)
-                highres.setHeight(x, y, 0)
-                highres.setColor(x, y, &hffe4d8)
+            highres.setCallback(x, y, @rayDefault)
+            highres.setWall(x, y, 0)
+            highres.setHeight(x, y, _
+              (abs(sin(x*3*TO_RAD)*cos(y*3*TO_RAD))+sin(x*3*TO_RAD))*-h _
+            - (abs(sin(y*TO_RAD)))*-h _
+            + (abs(cos(y/10*TO_RAD)))*-h _
+            )
+            if highres.heights(x, y) < -int(h*0.95) then
+                highres.setHeight(x, y, -int(h*0.95))
+                'highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
+                'highres.setColor(x, y, &h5c73ab)
+                r = int(16*rnd(1))-32
+                highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
+                highres.setData(x, y, 0, 777)
             else
-                highres.setWall(x, y, 0)
-                highres.setHeight(x, y, _
-                  (abs(sin(x*3*TO_RAD)*cos(y*3*TO_RAD))+sin(x*3*TO_RAD))*-3000 _
-                - (abs(sin(y*TO_RAD)))*-3000 _
-                + (abs(cos(y/10*TO_RAD)))*-3000 _
-                )
-                if highres.heights(x, y) < -4000 then
-                    highres.setHeight(x, y, -4000)
-                    highres.setColor(x, y, rgb(&h8e-50, &h92-20, &hbf-20))
-                else
-                    r = int(16*rnd(1))-32
-                    highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
-                end if
+                r = int(16*rnd(1))-32
+                highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
             end if
         next x
+        if (y and 511) = 0 then print ".";
     next y
     dim dx as integer
     dim dy as integer
     dim c as string
-    dim h as integer
+    'dim h as integer
     dim low_h as integer
     dim obj_id as integer
     dim colr as integer
     dim g as integer, b as integer
     dim chance as double
+    
+    print ".";
+    
+    '// mountains
+    dx = int(highres.w*rnd(1))
+    dy = int(highres.h*rnd(1))
+    for y = dy-500 to dy+500
+    for x = dx-500 to dx+500
+        if highres.heights(x, y) > 0 then
+            highres.setWall(x, y, 0)
+            highres.setHeight(x, y, _
+              ((sin((int(y) * int(x))*0.01*TO_RAD))*3000 _
+            ))
+            'if highres.heights(x, y) < -100 then
+            '    highres.setHeight(x, y, -100)
+            '    'highres.setColor(x, y, rgb(&h8e-50, &h92-20, &hbf-20))
+            '    r = int(16*rnd(1))-32
+            '    highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
+            '    highres.setData(x, y, 0, 777)
+            'else
+                r = int(16*rnd(1))-32
+                highres.setColor(x, y, rgb(&hd2+r, &hd2+r, &hd2+r))
+                highres.setData(x, y, 0, 0)
+            'end if
+        end if
+    next x
+    next y
+    
+    print ".";
+    
+    '// desert
+    dx = int(highres.w*rnd(1))
+    dy = int(highres.h*rnd(1))
+    for y = dy-300 to dy+300
+    for x = dx-300 to dx+300
+        if highres.heights(x, y) > 0 then
+            highres.setWall(x, y, 0)
+            highres.setHeight(x, y, _
+              ((sin((int(y) and int(x))*3*TO_RAD))*3000 _
+            ))
+            if highres.heights(x, y) < -250 then
+                highres.setHeight(x, y, -250)
+                r  = (1-sin(y*30))*10
+                r += (1-cos(x*30))*10
+                r = 0
+                r = int(16*rnd(1))-32
+                highres.setColor(x, y, rgb(&hdd+r, &hb2+r, &h5c+r))
+                highres.setData(x, y, 0, 777)
+            else
+                r = int(16*rnd(1))-32
+                r += int(x*y) and 7
+                highres.setColor(x, y, rgb(&hdd+r, &hb2+r, &h5c+r))
+                highres.setData(x, y, 0, 0)
+            end if
+        end if
+    next x
+    next y
+    
+    print ".";
     
     '// snow caps
     dx = int(highres.w*rnd(1))
@@ -1029,9 +1362,12 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
             if b > 255 then b = 255
             chance = -int(16*rnd(1))
             highres.setColor(x, y, rgb(r+chance, g+chance, b+chance))
+            highres.setData(x, y, 0, 0)
         end if
     next x
     next y
+    
+    print ".";
     
     '// swamp
     dx = int(highres.w*rnd(1))
@@ -1041,6 +1377,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
             highres.setHeight(x, y, highres.heights(x, y)/5)
             r = int(16*rnd(1))-32
             highres.setColor(x, y, rgb(&h7d+r, &h92+r, &h6c+r))
+            highres.setData(x, y, 0, 0)
         next x
     next y
     for y = dy-180 to dy+180
@@ -1048,19 +1385,12 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
             if int(32*rnd(1)) = 1 then
                 highres.setHeight(x, y, highres.heights(x, y)+300+int(rnd(1)*1))
                 highres.setColor(x, y, rgb(&h9d+r, &h92+r, &h5c+r))
+                highres.setData(x, y, 0, 0)
             end if
         next x
     next y
     
-    '// desert
-    dx = int(highres.w*rnd(1))
-    dy = int(highres.h*rnd(1))
-    for y = dy-200 to dy+200
-    for x = dx-200 to dx+200
-        'highres.setColor(x, y, rgb(&hff, &he5, &h00))
-    next x
-    next y
-    
+    print ".";
     
     for i = 0 to 0
         obj_id = 1'int(2*rnd(1))
@@ -1113,6 +1443,8 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
         next dy
     next i
     
+    print ".";
+    
     '// glow boxes
     dim rx as integer, ry as integer
     dim dist as integer
@@ -1143,28 +1475,58 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
         highres.setHeight(rx, ry, highres.heights(rx, ry)+25000)
     next i
     
+    print ".";
+    
+    '// portals
+    dim dat as integer
+    dim xFrom as integer, yFrom as integer
+    dim xTo as integer, yTo as integer
+    for i = 0 to 9
+        do
+            xFrom = int(highres.w*rnd(1)): yFrom = int(highres.h*rnd(1))
+            xTo = int(highres.w*rnd(1)): yTo = int(highres.h*rnd(1))
+        loop while (xFrom = xTo) and (yFrom = yTo)
+        highres.setData(x, y, 0, (xFrom shl 16) or yFrom)
+        highres.setData(x, y, 1, (xTo shl 16) or yTo)
+        highres.setCallback(x, y, @rayTeleport)
+    next i
+    
+    print ".";
+    
     '// generate low-res maps
     for y = 0 to medres.h-1
         for x = 0 to medres.w-1
             medres.setWall(x, y, highres.getWallAvg(x*2, y*2, 2))
             medres.setHeight(x, y, highres.getHeightAvg(x*2, y*2, 2))
             medres.setColor(x, y, highres.getColorAvg(x*2, y*2, 2))
+            medres.setCallback(x, y, highres.getCallbackAvg(x*2, y*2, 2))
+            medres.setData(x, y, 0, highres.getDataAvg(x*2, y*2, 0, 2))
+            medres.setData(x, y, 1, highres.getDataAvg(x*2, y*2, 1, 2))
         next x
     next y
+    print ".";
     for y = 0 to lowres.h-1
         for x = 0 to lowres.w-1
             lowres.setWall(x, y, highres.getWallAvg(x*4, y*4, 4))
             lowres.setHeight(x, y, highres.getHeightAvg(x*4, y*4, 4))
             lowres.setColor(x, y, highres.getColorAvg(x*4, y*4, 4))
+            lowres.setCallback(x, y, highres.getCallbackAvg(x*4, y*4, 4))
+            lowres.setData(x, y, 0, highres.getDataAvg(x*4, y*4, 0, 4))
+            lowres.setData(x, y, 1, highres.getDataAvg(x*4, y*4, 1, 4))
         next x
     next y
+    print ".";
     for y = 0 to subres.h-1
         for x = 0 to subres.w-1
             subres.setWall(x, y, highres.getWallAvg(x*8, y*8, 8))
             subres.setHeight(x, y, highres.getHeightAvg(x*8, y*8, 8))
             subres.setColor(x, y, highres.getColorAvg(x*8, y*8, 8))
+            subres.setCallback(x, y, highres.getCallbackAvg(x*8, y*8, 8))
+            subres.setData(x, y, 0, highres.getDataAvg(x*8, y*8, 0, 8))
+            subres.setData(x, y, 1, highres.getDataAvg(x*8, y*8, 1, 8))
         next x
     next y
+    print "ready!"
 end sub
 
 data "eeeeeeeeeeeeeeee"
@@ -1200,6 +1562,23 @@ data "2468888888888642"
 data "2466666666666642"
 data "2444444444444442"
 data "2222222222222222"
+
+data "................"
+data "............#..."
+data "..........####.."
+data "........########"
+data "....#######....."
+data "############...."
+data "...##########..."
+data "...##......##..."
+data "..##.....##....."
+data "..#....##......."
+data "................"
+data "................"
+data "................"
+data "................"
+data "................"
+data "................"
 
 sub gfx_dice(sprites() as SDL_RECT, filename as string, img_w as integer, img_h as integer, sp_w as integer, sp_h as integer, scale_x as double=1.0, scale_y as double=0)
 
@@ -1234,4 +1613,38 @@ function grn(argb32 as integer) as integer
 end function
 function blu(argb32 as integer) as integer
     return argb32 and &hff
+end function
+function rgbAdd(colr as integer, amount as integer, keepHue as integer = 0) as integer
+    dim r as integer
+    dim g as integer
+    dim b as integer
+    r = (colr shr 16) and &hff
+    g = (colr shr  8) and &hff
+    b = (colr       ) and &hff
+    if keepHue then
+        '// TODO
+    else
+        r += amount
+        g += amount
+        b += amount
+        if r > 255 then r = 255: if r < 0 then r = 0
+        if g > 255 then g = 255: if g < 0 then g = 0
+        if b > 255 then b = 255: if b < 0 then b = 0
+    end if
+    return rgb(r, g, b)
+end function
+function rgbMix(colr0 as integer, colr1 as integer, f1 as double = 1, f2 as double = 1) as integer
+    dim r0 as integer, r1 as integer
+    dim g0 as integer, g1 as integer
+    dim b0 as integer, b1 as integer
+    dim r as integer
+    dim g as integer
+    dim b as integer
+    r0 = (colr0 shr 16) and &hff: r1 = (colr1 shr 16) and &hff
+    g0 = (colr0 shr  8) and &hff: g1 = (colr1 shr  8) and &hff
+    b0 = (colr0       ) and &hff: b1 = (colr1       ) and &hff
+    r = (r0*f1+r1*f2)/(f1+f2)
+    g = (g0*f1+g1*f2)/(f1+f2)
+    b = (b0*f1+b1*f2)/(f1+f2)
+    return rgb(r, g, b)
 end function
