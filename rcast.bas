@@ -1,8 +1,8 @@
 #include once "SDL2/SDL.bi"
 
 #define FULLSCREEN 1
-#define SCREEN_X   1920'352'1920'352
-#define SCREEN_Y   1080'198'1080'198
+#define SCREEN_X   352'1920'352
+#define SCREEN_Y   198'1080'198
 #define HALF_X     SCREEN_X \ 2
 #define HALF_Y     SCREEN_Y \ 2
 #define TO_RAD     0.0174532925
@@ -12,9 +12,10 @@
 #define MAP_WIDTH    1024
 #define MAP_HEIGHT   1024
 #define HEIGHT_RATIO 127*(SCREEN_Y/300)
-#define PREC         (2^11)
-#define PREC_SHIFT   11
+#define PREC         (2^14)
+#define PREC_SHIFT   14
 #define MAX_DISTANCE 4096*PREC' 300
+#define MAX_INT      (2^16)
 
 '// TIMER FUNCTIONS  ===================================================
 declare function UpdateSpeed (save_time as integer=1) as double
@@ -504,18 +505,18 @@ sub main()
     dim vr as Vector
     dim vray as Vector
     
-    dim dx as integer, dy as integer
+    dim dx as uinteger, dy as uinteger
     dim ax as integer, ay as integer
     dim ex as integer, ey as integer
-    dim x_dx as integer, x_dy as integer
-    dim y_dx as integer, y_dy as integer
+    dim x_dx as uinteger, x_dy as uinteger
+    dim y_dx as uinteger, y_dy as uinteger
     dim x_ax as integer, x_ay as integer
     dim y_ax as integer, y_ay as integer
-    dim x_ex as integer, x_ey as integer
-    dim y_ex as integer, y_ey as integer
-    dim lx as integer, ly as integer
+    dim x_ex as uinteger, x_ey as uinteger
+    dim y_ex as uinteger, y_ey as uinteger
+    dim lx as uinteger, ly as uinteger
     dim xHit as integer, yHit as integer
-    dim xDist as integer, yDist as integer
+    dim xDist as uinteger, yDist as uinteger
     dim dist as integer
     dim dc as double
     dim sliceSize as single
@@ -850,7 +851,7 @@ sub main()
             
             fx += abs(iif(vray.x > 0, map->w-1-px, -px)/vray.x)
             
-            if fx > 524288 then fx = 524288
+            if fx > MAX_INT then fx = MAX_INT
             xDistMax = fx*PREC
             
             if py < 0 or py >= map->h then
@@ -859,7 +860,7 @@ sub main()
             
             fy += abs(iif(vray.y > 0, map->h-1-py, -py)/vray.y)
             
-            if fy > 524288 then fy = 524288
+            if fy > MAX_INT then fy = MAX_INT
             yDistMax = fy*PREC
             
             distMax = iif(xDistMax < yDistMax, xDistMax, yDistMax)
@@ -873,13 +874,13 @@ sub main()
                 fx = iif(vray.x > 0, -px, MAP_WIDTH-px)
             end if
             fy = vray.y*abs(fx/vray.x)
-            if fy >  524288 then fy =  524288
-            if fy < -524288 then fy = -524288
+            if fy >  MAX_INT then fy =  MAX_INT
+            if fy < -MAX_INT then fy = -MAX_INT
             ex = iif(vray.x >= 0, 0, -1)
             ey = 0
             
             fo = abs(fx/vray.x)
-            if fo > 524288 then fo = 524288
+            if fo > MAX_INT then fo = MAX_INT
             xDist = fo*PREC
             
             dx = (fx+px)*PREC
@@ -894,13 +895,13 @@ sub main()
                 fy = iif(vray.y > 0, -py, MAP_HEIGHT-py)
             end if
             fx = vray.x*abs(fy/vray.y)
-            if fx >  524288 then fx =  524288
-            if fx < -524288 then fx = -524288
+            if fx >  MAX_INT then fx =  MAX_INT
+            if fx < -MAX_INT then fx = -MAX_INT
             ex = 0
             ey = iif(vray.y >= 0, 0, -1)
             
             fo = abs(fy/vray.y)
-            if fo > 524288 then fo = 524288
+            if fo > MAX_INT then fo = MAX_INT
             yDist = fo*PREC
             
             dy = (fy+py)*PREC
