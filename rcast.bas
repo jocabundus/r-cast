@@ -1,450 +1,34 @@
 #include once "SDL2/SDL.bi"
 
 #define FULLSCREEN 1
-#define SCREEN_X   352'1920'352
-#define SCREEN_Y   198'1080'198
+#define SCREEN_X   1920'352
+#define SCREEN_Y   1080'198
 #define HALF_X     SCREEN_X \ 2
 #define HALF_Y     SCREEN_Y \ 2
-#define TO_RAD     0.0174532925
 #define SUPERBIG   &h7fffffff
 #define SUPERSML   0.00000001
 
-#define MAP_WIDTH    1024
-#define MAP_HEIGHT   1024
-#define HEIGHT_RATIO 127*(SCREEN_Y/300)
+
 #define PREC         (2^14)
 #define PREC_SHIFT   14
-#define MAX_DISTANCE 4096*PREC' 300
+#define MAX_DISTANCE (4096 shl PREC_SHIFT)' 300
 #define MAX_INT      (2^16)
 
-'// TIMER FUNCTIONS  ===================================================
-declare function UpdateSpeed (save_time as integer=1) as double
-declare function GetDelay () as double
+dim shared HEIGHT_RATIO as integer
+HEIGHT_RATIO = 127*(SCREEN_Y/300) shl PREC_SHIFT
 
-dim shared TimerSeconds as double
-dim shared TimerMaxDiff as double = 1.0
-dim shared TimerLastTime as double
-
-'- Calculate the global delay factor
-function UpdateSpeed (save_time as integer=1) as double
-	
-	dim seconds as double
-	
-	seconds       = TIMER-TimerLastTime
-	TimerLastTime = TIMER
-	
-	if seconds > TimerMaxDiff then
-		seconds = TimerMaxDiff
-	end if
-	
-	if save_time then
-		TimerSeconds = seconds
-	end if
-	
-	return seconds
-	
-end function
-
-'- Return the delay factor
-function GetDelay () as double
-
-	return TimerSeconds
-	
-end function
-
-function GetLastTime () as double
-
-	return TimerLastTime
-
-end function
-'// END TIMER FUNCTIONS  ===============================================
+#include once "modules/inc/timer.bi"
+#include once "modules/inc/gfont.bi"
+#include once "modules/inc/vector.bi"
+#include once "modules/inc/mesh.bi"
+#include once "modules/inc/flatmap.bi"
+#include once "modules/inc/bsp.bi"
+#include once "modules/inc/rgb.bi"
 
 '// GRAPHICS FUNCTIONS  ================================================
 declare sub gfx_dice(sprites() as SDL_RECT, filename as string, img_w as integer, img_h as integer, sp_w as integer, sp_h as integer, scale_x as double=1.0, scale_y as double=0)
-declare function SDL_CreateTargetTextureFromSurface( renderer as SDL_RENDERER ptr, surface as SDL_Surface ptr, pixel_format as integer = SDL_PIXELFORMAT_ARGB8888 ) as SDL_Texture ptr
-declare function red(argb32 as integer) as integer
-declare function grn(argb32 as integer) as integer
-declare function blu(argb32 as integer) as integer
-declare function rgbAdd(colr as integer, amount as integer, keepHue as integer = 0) as integer
-declare function rgbMix(colr0 as integer, colr1 as integer, f1 as double = 1, f2 as double = 1) as integer
 '// END GRAPHICS FUNCTIONS  ============================================
 
-'// FONT HANDLER  ======================================================
-#define GFONT_W 8
-#define GFONT_H	8
-
-type GFont
-private:
-    _sprites(1024) as SDL_RECT
-    _sprites_w as integer = GFONT_W
-    _sprites_h as integer = GFONT_H
-    _sprite_offset as integer = 0
-    _gfx_sprites as SDL_Texture ptr
-    _gfx_renderer as SDL_Renderer ptr ptr
-    _screen_w as integer = 0
-public:
-    declare constructor(renderer as SDL_Renderer ptr ptr)
-    declare function load(filename as string, img_w as integer, img_h as integer, sp_w as integer, sp_h as integer, scale_x as double=1.0, scale_y as double=0) as GFont ptr
-    declare function writeText(text as string, x as integer, y as integer) as GFont ptr
-    declare function centerText(text as string, y as integer) as GFont ptr
-    declare function setOffset(offset as integer) as GFont ptr
-    declare sub release()
-end type
-
-constructor GFont(renderer as SDL_Renderer ptr ptr)
-    this._gfx_renderer = renderer
-end constructor
-
-sub GFont.release()
-    SDL_DestroyTexture( this._gfx_sprites )
-end sub
-
-function GFont.load(filename as string, img_w as integer, img_h as integer, sp_w as integer, sp_h as integer, scale_x as double=1.0, scale_y as double=0) as GFont ptr
-
-    if scale_y = 0 then
-	scale_y = scale_x
-    end if
-    
-    dim gfxSource as SDL_Surface ptr = SDL_LoadBMP(filename)
-    
-    SDL_SetColorKey( gfxSource, SDL_TRUE, SDL_MapRGB(gfxSource->format, 255, 0, 255) )
-    this._gfx_sprites = SDL_CreateTextureFromSurface( *this._gfx_renderer, gfxSource )
-    
-    dim row_w as integer, row_h as integer
-    row_w = int(img_w / sp_w)
-    row_h = int(img_h / sp_h)
-    
-    dim i as integer
-    for i = 0 to row_w*row_h-1
-        this._sprites(i).x = (i mod row_w)*sp_w
-        this._sprites(i).y = int(i/row_w)*sp_h
-        this._sprites(i).w = sp_w
-        this._sprites(i).h = sp_h
-    next i
-    
-    this._sprites_w = sp_w
-    this._sprites_h = sp_h
-
-    return @this
-
-end function
-
-function GFont.writeText(text as string, x as integer, y as integer) as GFont ptr
-    
-    dim n as integer
-    dim v as integer
-    
-    dim dstRect as SDL_Rect
-    dstRect.x = x: dstRect.y = y
-    dstRect.w = this._sprites_w: dstRect.h = this._sprites_h
-    
-    for n = 1 to len(text)
-        v = asc(mid$(text, n, 1))-32+this._sprite_offset
-        SDL_RenderCopy( *this._gfx_renderer, this._gfx_sprites, @this._sprites(v), @dstRect)
-        dstRect.x += this._sprites_w
-    next n
-    
-    return @this
-    
-end function
-
-function GFont.centerText(text as string, y as integer) as GFont ptr
-
-    if this._screen_w = 0 then
-        SDL_RenderGetLogicalSize(*this._gfx_renderer, @this._screen_w, null)
-    end if
-    
-    return this.writeText(text, int((this._screen_w-len(text)*this._sprites_w)/2), y)
-    
-end function
-
-function GFont.setOffset(offset as integer) as GFont ptr
-	
-    this._sprite_offset = offset
-    
-    return @this
-	
-end function
-'// END FONT HANDLER  ==================================================
-
-type Vector
-    x as double
-    y as double
-    z as double
-end type
-
-type Caster
-    intersection as Vector
-    ray_initial  as Vector
-    ray_continue as Vector    
-    ray_offset   as Vector
-end type
-
-declare sub rayDefault(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-
-type FlatMap
-private:
-    _w as integer
-    _h as integer
-    dim   _walls(MAP_WIDTH*MAP_HEIGHT) as byte
-    dim _heights(MAP_WIDTH*MAP_HEIGHT) as short
-    dim  _colors(MAP_WIDTH*MAP_HEIGHT) as integer
-    dim _callbacks(MAP_WIDTH*MAP_HEIGHT) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-    dim _data(MAP_WIDTH*MAP_HEIGHT*2) as integer
-public:
-    declare constructor(w as integer, h as integer)
-    declare function walls(x as integer, y as integer) as byte
-    declare function heights(x as integer, y as integer) as short
-    declare function colors(x as integer, y as integer) as integer
-    declare function callbacks(x as integer, y as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-    declare function datas(x as integer, y as integer, z as integer=0) as integer
-    declare property w() as integer
-    declare property w(new_w as integer)
-    declare property h() as integer
-    declare property h(new_h as integer)
-    declare function setWall(x as integer, y as integer, new_w as integer) as FlatMap ptr
-    declare function setHeight(x as integer, y as integer, new_h as integer) as FlatMap ptr
-    declare function setColor(x as integer, y as integer, new_c as integer) as FlatMap ptr
-    declare function setCallback(x as integer, y as integer, s as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)) as FlatMap ptr
-    declare function setData(x as integer, y as integer, z as integer, value as integer) as FlatMap ptr
-    declare function getWallAvg(x as integer, y as integer, size as integer) as integer
-    declare function getHeightAvg(x as integer, y as integer, size as integer) as integer
-    declare function getColorAvg(x as integer, y as integer, size as integer) as integer
-    declare function getCallbackAvg(x as integer, y as integer, size as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-    declare function getDataAvg(x as integer, y as integer, z as integer, size as integer) as integer
-end type
-constructor FlatMap(map_w as integer, map_h as integer)
-    this._w = map_w
-    this._h = map_h
-    dim i as integer
-    for i = 0 to MAP_WIDTH*MAP_HEIGHT-1: this._callbacks(i) = @rayDefault: next i
-    'redim this._walls(map_w, map_h)
-    'redim this._heights(map_w, map_h)
-    'redim this._colors(map_w, map_h)
-end constructor
-function FlatMap.walls(x as integer, y as integer) as byte
-    if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        return this._walls(x+((this._h-1-y) shl 10))
-    else
-        return 0
-    end if
-end function
-function FlatMap.heights(x as integer, y as integer) as short
-    if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        return this._heights(x+((this._h-1-y) shl 10))
-    else
-        return 0
-    end if
-end function
-function FlatMap.colors(x as integer, y as integer) as integer
-    if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        return this._colors(x+((this._h-1-y) shl 10))
-    else
-        return 0
-    end if
-end function
-function FlatMap.callbacks(x as integer, y as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-    if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        return this._callbacks(x+((this._h-1-y) shl 10))
-    else
-        return @rayDefault
-    end if
-end function
-function FlatMap.datas(x as integer, y as integer, z as integer=0) as integer
-    if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        return this._data(x+((this._h-1-y) shl 10)+(z shl 20))
-    else
-        return 0
-    end if
-end function
-property Flatmap.w() as integer
-    return this._w
-end property
-property Flatmap.w(new_w as integer)
-    this._w = new_w
-end property
-property Flatmap.h() as integer
-    return this._h
-end property
-property Flatmap.h(new_h as integer)
-    this._h = new_h
-end property
-function Flatmap.setWall(x as integer, y as integer, new_w as integer) as FlatMap ptr
-    if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        this._walls(x+((this._h-1-y) shl 10)) = new_w
-    end if
-    return @this
-end function
-function Flatmap.setHeight(x as integer, y as integer, new_h as integer) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        this._heights(x+((this._h-1-y) shl 10)) = new_h
-    end if
-    return @this
-end function
-function Flatmap.setColor(x as integer, y as integer, new_c as integer) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        this._colors(x+((this._h-1-y) shl 10)) = new_c
-    end if
-    return @this
-end function
-function Flatmap.setCallback(x as integer, y as integer, s as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        this._callbacks((this._h-1-y) shl 10) = s
-    end if
-    return @this
-end function
-function Flatmap.setData(x as integer, y as integer, z as integer, value as integer) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
-        this._data(x+((this._h-1-y) shl 10)+(z shl 20)) = value
-    end if
-    return @this
-end function
-function FlatMap.getWallAvg(x as integer, y as integer, size as integer) as integer
-    dim mx as integer, my as integer
-    dim sum as double
-    dim max as double
-    for my = y to y+size-1
-        for mx = x to x+size-1
-            sum += this.walls(mx, my)
-        next mx
-    next my
-    size *= size
-    return sum / size
-end function
-function FlatMap.getHeightAvg(x as integer, y as integer, size as integer) as integer
-    dim mx as integer, my as integer
-    'dim sum as double
-    dim max as double
-    max = -99999
-    for my = y to y+size-1
-        for mx = x to x+size-1
-            'sum += this.heights(mx, my)
-            if this.heights(mx, my) > max then
-                max = this.heights(mx, my)
-            end if
-        next mx
-    next my
-    'size *= size
-    'return sum / size
-    return max
-end function
-function FlatMap.getColorAvg(x as integer, y as integer, size as integer) as integer
-    dim mx as integer, my as integer
-    dim colr as integer
-    dim max as double
-    max = -99999
-    for my = y to y+size-1
-        for mx = x to x+size-1
-            if this.heights(mx, my) > max then
-                max = this.heights(mx, my)
-                colr = this.colors(mx, my)
-            end if
-        next mx
-    next my
-    return colr
-    'dim r as integer, g as integer, b as integer
-    'for my = y to y+size-1
-    '    for mx = x to x+size-1
-    '        r += ((this.colors(mx, my) shr 16) and &hff)
-    '        g += ((this.colors(mx, my) shr  8) and &hff)
-    '        b += (this.colors(mx, my) and &hff)
-    '    next mx
-    'next my
-    'size *= size
-    'return rgb(r / size, g / size, b / size)
-end function
-function FlatMap.getCallbackAvg(x as integer, y as integer, size as integer) as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-    dim mx as integer, my as integer
-    'dim sum as double
-    dim s as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-    dim max as double
-    max = -99999
-    s = 0
-    for my = y to y+size-1
-        for mx = x to x+size-1
-            'sum += this.heights(mx, my)
-            if this.heights(mx, my) > max then
-                max = this.heights(mx, my)
-                s = this.callbacks(mx, my)
-            end if
-        next mx
-    next my
-    'size *= size
-    'return sum / size
-    return s
-end function
-function FlatMap.getDataAvg(x as integer, y as integer, z as integer, size as integer) as integer
-    dim mx as integer, my as integer
-    'dim sum as double
-    dim dat as integer
-    dim max as double
-    max = -99999
-    for my = y to y+size-1
-        for mx = x to x+size-1
-            'sum += this.heights(mx, my)
-            if this.heights(mx, my) > max then
-                max = this.heights(mx, my)
-                dat = this.datas(mx, my, z)
-            end if
-        next mx
-    next my
-    'size *= size
-    'return sum / size
-    return dat
-end function
-
-type BspNode
-private:
-    _normal as Vector
-    _behind as BspNode ptr
-    _front as BspNode ptr
-    _data as any ptr
-public:
-    declare constructor()
-    declare function getNormal() as Vector ptr
-    declare function getBehind() as BspNode ptr
-    declare function getFront() as BspNode ptr
-    declare function getData() as any ptr
-    declare function setData(p as any ptr) as BspNode ptr
-end type
-
-constructor BspNode
-    this._behind = 0
-    this._front = 0
-    this._data = 0
-end constructor
-function BspNode.getNormal() as Vector ptr
-    return @this._normal
-end function
-function BspNode.getBehind() as BspNode ptr
-    return this._behind
-end function
-function BspNode.getFront() as BspNode ptr
-    return this._front
-end function
-function BspNode.getData() as any ptr
-    return this._data
-end function
-function BspNode.setData(p as any ptr) as BspNode ptr
-    this._data = p
-    return @this
-end function
-
-type BspTree
-private:
-    _node_start as BspNode
-    _nodes(4096) as BspNode
-public:
-    declare function addBehind(normal as Vector) as BspTree ptr
-    declare function addFront(normal as Vector) as BspTree ptr
-end type
-
-declare sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, c as integer, a as integer = 0)
-declare function vectorFromAngle(a as double) as Vector
-declare function vectorToRight(u as Vector) as Vector
-declare function vectorDot(u as Vector, v as Vector) as double
-declare function VectorToUnit(u as Vector) as Vector
-declare function vectorCross(u as Vector, v as Vector) as Vector
 declare sub main()
 declare sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
 
@@ -488,6 +72,24 @@ SDL_Quit
 
 end
 
+dim shared meshCount as integer = 0
+dim shared meshes(64) as Mesh
+
+sub loadHorse()
+    restore horse
+    dim grid(16, 16) as integer
+    dim x as integer, y as integer
+    dim row as string
+    for y = 0 to 15
+        read row
+        for x = 1 to 16
+            if mid(row, x, 1) = "#" then
+                
+            end if
+        next x
+    next y
+end sub
+
 sub main()
 
     dim px as double, py as double
@@ -519,7 +121,7 @@ sub main()
     dim xDist as uinteger, yDist as uinteger
     dim dist as integer
     dim dc as double
-    dim sliceSize as single
+    dim sliceSize as double
     
     dim event as SDL_Event
 	dim keys as const ubyte ptr
@@ -554,7 +156,7 @@ sub main()
     dim nph as double
     midline += (HALF_Y/2)
     
-    dim rayCallback as sub(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+    dim rayCallback as sub(byref x_dx as uinteger, byref x_dy as uinteger, byref y_dx as uinteger, byref y_dy as uinteger)
     
     dim walkingSpeed as double = 4.0
     dim flyingSpeed as double = 30
@@ -920,7 +522,7 @@ sub main()
             end if
             lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
             
-            sliceSize = (HEIGHT_RATIO shl PREC_SHIFT) / dist
+            sliceSize = HEIGHT_RATIO / dist
             dim h as double
             h = map->heights(int(px), int(py))*0.01
             top = midline+int(sliceSize*((ph-h)+strafeValue))+1
@@ -981,11 +583,15 @@ sub main()
                 if xDist < yDist then
                     x_dx  += x_ax: x_dy += x_ay
                     xDist += x_di
-                    'map->callbacks(x_dx, x_dy)(x_dx, y_dy, 0, 0)
+                    if map->callbacks(x_dx, x_dy) <> 0 then
+                        map->callbacks(x_dx, x_dy)(x_dx, y_dy, 0, 0)
+                    end if
                 else
                     y_dy  += y_ay: y_dx += y_ax
                     yDist += y_di
-                    'map->callbacks(y_dx, y_dy)(0, 0, y_dx, y_dy)
+                    if map->callbacks(y_dx, y_dy) <> 0 then
+                        map->callbacks(y_dx, y_dy)(0, 0, y_dx, y_dy)
+                    end if
                 end if
                 
                 if xDist < yDist then
@@ -998,9 +604,7 @@ sub main()
                     dist = yDist
                 end if
                 
-                if dist > distMax then exit do
-                
-                sliceSize = (HEIGHT_RATIO shl PREC_SHIFT) / dist
+                sliceSize = HEIGHT_RATIO / dist
                 
                 '// draw top
                 top = midline+int(sliceSize*((ph-h)+strafeValue))+1
@@ -1108,6 +712,13 @@ sub main()
                 
             loop
             
+            '// draw meshes
+            dim mv as MeshTriangle ptr
+            for i = 0 to meshCount-1
+                meshes(i).startOver()
+                mv = meshes(i).getNext()
+            next i
+            
             '// draw sky
             'if bottom >= 0 then
             '    drawLine f, 0, f, bottom, colorSky
@@ -1156,84 +767,9 @@ sub main()
 
 end sub
 
-sub rayDefault(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
+sub rayTeleport(byref x_dx as integer, byref x_dy as integer, byref y_dx as integer, byref y_dy as integer)
 
 end sub
-
-sub rayTeleport(byref x_dx as double, byref x_dy as double, byref y_dx as double, byref y_dy as double)
-
-end sub
-
-sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, c as integer, a as integer = 0)
-return
-    dim r as integer, g as integer, b as integer
-    
-    r = (c shr 16) and &hff
-    g = (c shr 8 ) and &hff
-    b = (c and &hff)
-    
-    r += a: g += a: b += a
-    
-    if r < 0 then r = 0
-    if b < 0 then b = 0
-    if g < 0 then g = 0
-    if r > 255 then r = 255
-    if g > 255 then g = 255
-    if b > 255 then b = 255
-
-    SDL_SetRenderDrawColor gfxRenderer, r, g, b, &hff
-    SDL_RenderDrawLine gfxRenderer, x0, y0, x1, y1
-
-end sub
-
-function vectorFromAngle(a as double) as Vector
-
-    dim v as Vector
-    v.x = cos(a*TO_RAD)
-    v.y = sin(a*TO_RAD)
-    v.z = 0
-    
-    return v
-
-end function
-
-function vectorToRight(u as Vector) as Vector
-
-    dim v as Vector
-    v.y = -u.x
-    v.x =  u.y
-    
-    return v
-
-end function
-
-function vectorToUnit(u as Vector) as Vector
-    dim v as Vector
-    dim m as double
-    m = sqr(u.x*u.x+u.y*u.y+u.z*u.z)
-    if m <> 0 then
-        v.x = u.x / m
-        v.y = u.y / m
-        v.z = u.z / m
-    else
-        v.x = 0
-		v.y = 0
-        v.z = 0
-    end if
-    return v
-end function
-
-function vectorDot(u as Vector, v as Vector) as double
-    return u.x*v.x+u.y*v.y+u.z*v.z
-end function
-
-function vectorCross(u as Vector, v as Vector) as Vector
-    dim w as Vector
-    w.x = u.y*v.z - u.z*v.y
-    w.y = u.z*v.x - u.x*v.z    
-    w.z = u.x*v.y - u.y*v.x
-    return w
-end function
 
 sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     randomize timer
@@ -1257,7 +793,6 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     v = vectorFromAngle(rnd(1)*360)
     for y = 0 to highres.h-1
         for x = 0 to highres.w-1
-            highres.setCallback(x, y, @rayDefault)
             highres.setWall(x, y, 0)
             highres.setHeight(x, y, _
               (abs(sin(x*3*TO_RAD)*cos(y*3*TO_RAD))+sin(x*3*TO_RAD))*-h _
@@ -1393,6 +928,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     
     print ".";
     
+    restore objects
     for i = 0 to 0
         obj_id = 1'int(2*rnd(1))
         x = int(highres.w*rnd(1))
@@ -1529,7 +1065,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     next y
     print "ready!"
 end sub
-
+objects:
 data "eeeeeeeeeeeeeeee"
 data "eaaaaaaaaaaaaaae"
 data "eaeeeeeeeeeeeeae"
@@ -1563,7 +1099,7 @@ data "2468888888888642"
 data "2466666666666642"
 data "2444444444444442"
 data "2222222222222222"
-
+horse:
 data "................"
 data "............#..."
 data "..........####.."
@@ -1574,6 +1110,23 @@ data "...##########..."
 data "...##......##..."
 data "..##.....##....."
 data "..#....##......."
+data "................"
+data "................"
+data "................"
+data "................"
+data "................"
+data "................"
+'//====================
+data "................"
+data "............#..."
+data "..........####.."
+data "........########"
+data "....#######....."
+data "############...."
+data "...##########..."
+data "................"
+data "................"
+data "................"
 data "................"
 data "................"
 data "................"
@@ -1606,46 +1159,3 @@ sub gfx_dice(sprites() as SDL_RECT, filename as string, img_w as integer, img_h 
 
 end sub
 
-function red(argb32 as integer) as integer
-    return (argb32 shr 16) and &hff
-end function
-function grn(argb32 as integer) as integer
-    return (argb32 shr 8) and &hff
-end function
-function blu(argb32 as integer) as integer
-    return argb32 and &hff
-end function
-function rgbAdd(colr as integer, amount as integer, keepHue as integer = 0) as integer
-    dim r as integer
-    dim g as integer
-    dim b as integer
-    r = (colr shr 16) and &hff
-    g = (colr shr  8) and &hff
-    b = (colr       ) and &hff
-    if keepHue then
-        '// TODO
-    else
-        r += amount
-        g += amount
-        b += amount
-        if r > 255 then r = 255: if r < 0 then r = 0
-        if g > 255 then g = 255: if g < 0 then g = 0
-        if b > 255 then b = 255: if b < 0 then b = 0
-    end if
-    return rgb(r, g, b)
-end function
-function rgbMix(colr0 as integer, colr1 as integer, f1 as double = 1, f2 as double = 1) as integer
-    dim r0 as integer, r1 as integer
-    dim g0 as integer, g1 as integer
-    dim b0 as integer, b1 as integer
-    dim r as integer
-    dim g as integer
-    dim b as integer
-    r0 = (colr0 shr 16) and &hff: r1 = (colr1 shr 16) and &hff
-    g0 = (colr0 shr  8) and &hff: g1 = (colr1 shr  8) and &hff
-    b0 = (colr0       ) and &hff: b1 = (colr1       ) and &hff
-    r = (r0*f1+r1*f2)/(f1+f2)
-    g = (g0*f1+g1*f2)/(f1+f2)
-    b = (b0*f1+b1*f2)/(f1+f2)
-    return rgb(r, g, b)
-end function
