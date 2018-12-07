@@ -3,6 +3,7 @@
 constructor FlatMap(map_w as integer, map_h as integer)
     this._w = map_w
     this._h = map_h
+    this._size = map_w*map_h
     dim i as integer
     for i = 0 to MAP_WIDTH*MAP_HEIGHT-1: this._callbacks(i) = 0: next i
     'redim this._walls(map_w, map_h)
@@ -44,6 +45,13 @@ function FlatMap.datas(x as integer, y as integer, z as integer=0) as integer
         return 0
     end if
 end function
+function FlatMap.normals(x as integer, y as integer) as byte
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        return this._normals(x+((this._h-1-y) shl 10))
+    else
+        return 0
+    end if
+end function
 property Flatmap.w() as integer
     return this._w
 end property
@@ -63,26 +71,32 @@ function Flatmap.setWall(x as integer, y as integer, new_w as integer) as FlatMa
     return @this
 end function
 function Flatmap.setHeight(x as integer, y as integer, new_h as integer) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
         this._heights(x+((this._h-1-y) shl 10)) = new_h
     end if
     return @this
 end function
 function Flatmap.setColor(x as integer, y as integer, new_c as integer) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
         this._colors(x+((this._h-1-y) shl 10)) = new_c
     end if
     return @this
 end function
 function Flatmap.setCallback(x as integer, y as integer, s as sub(byref x_dx as uinteger, byref x_dy as uinteger, byref y_dx as uinteger, byref y_dy as uinteger)) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
         this._callbacks((this._h-1-y) shl 10) = s
     end if
     return @this
 end function
 function Flatmap.setData(x as integer, y as integer, z as integer, value as integer) as FlatMap ptr
-     if x >= 0 and x < this._w and y >= 0 and y < this._h then
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
         this._data(x+((this._h-1-y) shl 10)+(z shl 20)) = value
+    end if
+    return @this
+end function
+function Flatmap.setNormal(x as integer, y as integer, b as byte) as FlatMap ptr
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        this._normals(x+((this._h-1-y) shl 10)) = b
     end if
     return @this
 end function
@@ -178,4 +192,29 @@ function FlatMap.getDataAvg(x as integer, y as integer, z as integer, size as in
     'size *= size
     'return sum / size
     return dat
+end function
+function FlatMap.getNormalAvg(x as integer, y as integer, size as integer) as byte
+    dim mx as integer, my as integer
+    dim sum as integer
+    sum = 0
+    for my = y to y+size-1
+        for mx = x to x+size-1
+            sum += this.normals(mx, my)
+        next mx
+    next my
+    return sum / (size*size)
+end function
+function FlatMap.getCellData(x as integer, y as integer) as FlatMapCell
+    dim cell as FlatMapCell
+    dim i as integer
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        i = x+((this._h-1-y) shl 10)
+        cell.wall   = this._walls(i)
+        cell.height = this._heights(i)
+        cell.colr   = this._colors(i)
+        cell.data0  = this._data(i)
+        cell.data1  = this._data(i+this._size)
+        cell.normal = this._normals(i)
+    end if
+    return cell
 end function
