@@ -2,7 +2,8 @@
 
 constructor Mesh()
     this._polyCount = 0
-    this._pointCount = 0
+    this._normalCount = 0
+    this._vertexCount = 0
     this._current = 0
     this._z = 0
 end constructor
@@ -36,29 +37,47 @@ function Mesh.sort() as Mesh ptr
     next i
     return @this
 end function
-function Mesh._addPoint(x as double, y as double, z as double) as Vector ptr
+function Mesh.addVertex(x as double, y as double, z as double) as Vector ptr
     dim i as integer
     dim n as integer
-    i = this._pointCount
+    i = this._vertexCount
     if i < 768 then
         for n = 0 to i-1
-            if (this._points(n).x = x) and (this._points(n).y = y) and (this._points(n).z = z) then
-                return @this._points(n)
+            if (this._vertices(n).x = x) and (this._vertices(n).y = y) and (this._vertices(n).z = z) then
+                return @this._vertices(n)
             end if
         next n
-        this._points(i).x = x
-        this._points(i).y = y
-        this._points(i).z = z
-        this._pointCount += 1
+        this._vertices(i).x = x
+        this._vertices(i).y = y
+        this._vertices(i).z = z
+        this._vertexCount += 1
     else
         return 0
     end if
-    return @this._points(i)
+    return @this._vertices(i)
 end function
-function Mesh._addPoint(v as Vector) as Vector ptr
-    return this._addPoint(v.x, v.y, v.z)
+function Mesh.addVertex(v as Vector) as Vector ptr
+    return this.addVertex(v.x, v.y, v.z)
 end function
-function Mesh.addPoly(u as Vector, v as Vector, w as Vector) as Mesh ptr
+function Mesh.addNormal(v as Vector) as Vector ptr
+    dim i as integer
+    dim n as integer
+    i = this._normalCount
+    if i < 768 then
+        for n = 0 to i-1
+            if (this._normals(n).x = v.x) and (this._normals(n).y = v.y) and (this._normals(n).z = v.z) then
+                return @this._normals(n)
+            end if
+        next n
+        this._normals(i).x = v.x
+        this._normals(i).y = v.y
+        this._normals(i).z = v.z
+        this._normalCount += 1
+    else
+        return 0
+    end if
+end function
+function Mesh.addPoly(u as Vector, v as Vector, w as Vector, nIdx as integer = -1) as Mesh ptr
     dim i as integer
     dim n as integer
     dim poly as MeshPoly ptr
@@ -130,36 +149,50 @@ function Mesh.addPoly(u as Vector, v as Vector, w as Vector) as Mesh ptr
         poly->v(0) = 0
         poly->v(1) = 0
         poly->v(2) = 0
-        for i = 0 to this._pointCount - 1
-            if (u.x = this._points(i).x) and (u.y = this._points(i).y) and (u.z = this._points(i).z) then
-                poly->v(0) = @this._points(i)
+        for i = 0 to this._vertexCount - 1
+            if (u.x = this._vertices(i).x) and (u.y = this._vertices(i).y) and (u.z = this._vertices(i).z) then
+                poly->v(0) = @this._vertices(i)
                 poly->idx(0) = i
                 exit for
             end if
         next i
         if poly->v(0) = 0 then addU = 1
-        for i = 0 to this._pointCount - 1
-            if (v.x = this._points(i).x) and (v.y = this._points(i).y) and (v.z = this._points(i).z) then
-                poly->v(1) = @this._points(i)
+        for i = 0 to this._vertexCount - 1
+            if (v.x = this._vertices(i).x) and (v.y = this._vertices(i).y) and (v.z = this._vertices(i).z) then
+                poly->v(1) = @this._vertices(i)
                 poly->idx(1) = i
                 exit for
             end if
         next i
         if poly->v(1) = 0 then addV = 1
-        for i = 0 to this._pointCount - 1
-            if (w.x = this._points(i).x) and (w.y = this._points(i).y) and (w.z = this._points(i).z) then
-                poly->v(2) = @this._points(i)
+        for i = 0 to this._vertexCount - 1
+            if (w.x = this._vertices(i).x) and (w.y = this._vertices(i).y) and (w.z = this._vertices(i).z) then
+                poly->v(2) = @this._vertices(i)
                 poly->idx(2) = i
                 exit for
             end if
         next i
         if poly->v(2) = 0 then addW = 1
-        if addU then poly->v(0) = this._addPoint(u): poly->idx(0) = this._pointCount-1
-        if addV then poly->v(1) = this._addPoint(v): poly->idx(1) = this._pointCount-1
-        if addW then poly->v(2) = this._addPoint(w): poly->idx(2) = this._pointCount-1
+        if addU then poly->v(0) = this.addVertex(u): poly->idx(0) = this._vertexCount-1
+        if addV then poly->v(1) = this.addVertex(v): poly->idx(1) = this._vertexCount-1
+        if addW then poly->v(2) = this.addVertex(w): poly->idx(2) = this._vertexCount-1
+        if nIdx >= 0 then poly->v(3) = this.getNormal(nIdx): poly->idx(3) = nIdx
         'this._polys(this._polyCount) = poly
         this._polyCount += 1
     end if
+    return @this
+end function
+function Mesh.addPolyByVertices(v0 as integer, v1 as integer, v2 as integer, nIdx as integer = -1) as Mesh ptr
+    'this.addPoly(*this.getVertex(v0), *this.getVertex(v1), *this.getVertex(v2), nIdx)
+    dim poly as MeshPoly ptr
+    poly = @this._polys(this._polyCount)
+    poly->v(0) = this.getVertex(v0): poly->idx(0) = v0
+    poly->v(1) = this.getVertex(v1): poly->idx(1) = v1
+    poly->v(2) = this.getVertex(v2): poly->idx(2) = v2
+    if nIdx >= 0 then
+        poly->v(3) = this.getNormal(nIdx): poly->idx(3) = nIdx
+    end if
+    this._polyCount += 1
     return @this
 end function
 function Mesh.addCube(x as double, y as double, z as double, xSize as double=1.0, ySize as double=1.0, zSize as double=1.0) as Mesh ptr
@@ -217,11 +250,16 @@ function Mesh.addCube(x as double, y as double, z as double, xSize as double=1.0
 end function
 function Mesh.translate(x as double, y as double, z as double) as Mesh ptr
     dim i as integer
-    for i = 0 to this._pointCount-1
-        this._points(i).x += x
-        this._points(i).y += y
-        this._points(i).z += z
+    for i = 0 to this._vertexCount-1
+        this._vertices(i).x += x
+        this._vertices(i).y += y
+        this._vertices(i).z += z
     next i
+    'for i = 0 to this._normalCount-1
+    '    this._normals(i).x += x
+    '    this._normals(i).y += y
+    '    this._normals(i).z += z
+    'next i
     return @this
 end function
 function Mesh.rotateX(a as double) as Mesh ptr
@@ -232,8 +270,15 @@ function Mesh.rotateX(a as double) as Mesh ptr
     dim v as Vector ptr
     va = vectorFromAngle(a)
     if a <> 0 then
-        for i = 0 to this._pointCount-1
-            v = @this._points(i)
+        for i = 0 to this._vertexCount-1
+            v = @this._vertices(i)
+            y = v->y*va.x + v->z*-va.y
+            z = v->y*va.y + v->z*va.x
+            v->y = y
+            v->z = z
+        next i
+        for i = 0 to this._normalCount-1
+            v = @this._normals(i)
             y = v->y*va.x + v->z*-va.y
             z = v->y*va.y + v->z*va.x
             v->y = y
@@ -250,8 +295,15 @@ function Mesh.rotateY(a as double) as Mesh ptr
     dim v as Vector ptr
     va = vectorFromAngle(a)
     if a <> 0 then
-        for i = 0 to this._pointCount-1
-            v = @this._points(i)
+        for i = 0 to this._vertexCount-1
+            v = @this._vertices(i)
+            x = v->x*va.x + v->z*-va.y
+            z = v->x*va.y + v->z*va.x
+            v->x = x
+            v->z = z
+        next i
+        for i = 0 to this._normalCount-1
+            v = @this._normals(i)
             x = v->x*va.x + v->z*-va.y
             z = v->x*va.y + v->z*va.x
             v->x = x
@@ -268,8 +320,15 @@ function Mesh.rotateZ(a as double) as Mesh ptr
     dim v as Vector ptr
     va = vectorFromAngle(a)
     if a <> 0 then
-        for i = 0 to this._pointCount-1
-            v = @this._points(i)
+        for i = 0 to this._vertexCount-1
+            v = @this._vertices(i)
+            x = v->x*va.x + v->y*-va.y
+            y = v->x*va.y + v->y*va.x
+            v->x = x
+            v->y = y
+        next i
+        for i = 0 to this._normalCount-1
+            v = @this._normals(i)
             x = v->x*va.x + v->y*-va.y
             y = v->x*va.y + v->y*va.x
             v->x = x
@@ -278,35 +337,53 @@ function Mesh.rotateZ(a as double) as Mesh ptr
     end if
     return @this
 end function
-function Mesh.addPointFast(v as Vector ptr) as Mesh ptr
+function Mesh.addVertexFast(v as Vector ptr) as Mesh ptr
     if v <> 0 then
-        this._points(this._pointCount) = *v
-        this._pointCount += 1
+        this._vertices(this._vertexCount) = *v
+        this._vertexCount += 1
+    end if
+    return @this
+end function
+function Mesh.addNormalFast(v as Vector ptr) as Mesh ptr
+    if v <> 0 then
+        this._normals(this._normalCount) = *v
+        this._normalCount += 1
     end if
     return @this
 end function
 function Mesh.addPolyFast(p as MeshPoly ptr) as Mesh ptr
     if p <> 0 then
-        this._polys(this._polyCount).v(0) = @this._points(p->idx(0))
-        this._polys(this._polyCount).v(1) = @this._points(p->idx(1))
-        this._polys(this._polyCount).v(2) = @this._points(p->idx(2))
+        this._polys(this._polyCount).v(0) = @this._vertices(p->idx(0))
+        this._polys(this._polyCount).v(1) = @this._vertices(p->idx(1))
+        this._polys(this._polyCount).v(2) = @this._vertices(p->idx(2))
+        this._polys(this._polyCount).v(3) = @this._normals(p->idx(3))
         this._polyCount += 1
     end if
     return @this
 end function
 function Mesh.copy(m as Mesh ptr) as Mesh ptr
     dim i as integer
-    for i = 0 to m->getPointCount()-1
-        this.addPointFast(m->getPoint(i))
+    for i = 0 to m->getVertexCount()-1
+        this.addVertexFast(m->getVertex(i))
+    next i
+    for i = 0 to m->getNormalCount()-1
+        this.addNormalFast(m->getNormal(i))
     next i
     for i = 0 to m->getPolyCount()-1
         this.addPolyFast(m->getPoly(i))
     next i
     return @this
 end function
-function Mesh.getPoint(idx as integer) as Vector ptr
-    if idx >= 0 and idx < this._pointCount then
-        return @this._points(idx)
+function Mesh.getVertex(idx as integer) as Vector ptr
+    if idx >= 0 and idx < this._vertexCount then
+        return @this._vertices(idx)
+    else
+        return 0
+    end if
+end function
+function Mesh.getNormal(idx as integer) as Vector ptr
+    if idx >= 0 and idx < this._normalCount then
+        return @this._normals(idx)
     else
         return 0
     end if
@@ -318,8 +395,11 @@ function Mesh.getPoly(idx as integer) as MeshPoly ptr
         return 0
     end if
 end function
-function Mesh.getPointCount() as integer
-    return this._pointCount
+function Mesh.getVertexCount() as integer
+    return this._vertexCount
+end function
+function Mesh.getNormalCount() as integer
+    return this._normalCount
 end function
 function Mesh.getPolyCount() as integer
     return this._polyCount
@@ -329,6 +409,7 @@ function Vector3.translate(x as double, y as double, z as double) as Vector3 ptr
     this.v(0).x += x: this.v(0).y += y: this.v(0).z += z
     this.v(1).x += x: this.v(1).y += y: this.v(1).z += z
     this.v(2).x += x: this.v(2).y += y: this.v(2).z += z
+    'this.v(3).x += x: this.v(3).y += y: this.v(3).z += z
     return @this
 end function
 function Vector3.rotateX(a as double) as Vector3 ptr
@@ -349,6 +430,10 @@ function Vector3.rotateX(a as double) as Vector3 ptr
         z = this.v(2).y*va.y + this.v(2).z*va.x
         this.v(2).y = y
         this.v(2).z = z
+        y = this.v(3).y*va.x + this.v(3).z*-va.y
+        z = this.v(3).y*va.y + this.v(3).z*va.x
+        this.v(3).y = y
+        this.v(3).z = z
     end if
     return @this
 end function
@@ -370,6 +455,10 @@ function Vector3.rotateY(a as double) as Vector3 ptr
         z = this.v(2).x*va.y + this.v(2).z*va.x
         this.v(2).x = x
         this.v(2).z = z
+        x = this.v(3).x*va.x + this.v(3).z*-va.y
+        z = this.v(3).x*va.y + this.v(3).z*va.x
+        this.v(3).x = x
+        this.v(3).z = z
     end if
     return @this
 end function
@@ -391,6 +480,10 @@ function Vector3.rotateZ(a as double) as Vector3 ptr
         y = this.v(2).x*va.y + this.v(2).y*va.x
         this.v(2).x = x
         this.v(2).y = y
+        x = this.v(3).x*va.x + this.v(3).y*-va.y
+        y = this.v(3).x*va.y + this.v(3).y*va.x
+        this.v(3).x = x
+        this.v(3).y = y
     end if
     return @this
 end function
@@ -423,6 +516,7 @@ function MeshPoly.copy() as Vector3
     v.v(0).x = *this.v(0).x: v.v(0).y = *this.v(0).y: v.v(0).z = *this.v(0).z
     v.v(1).x = *this.v(1).x: v.v(1).y = *this.v(1).y: v.v(1).z = *this.v(1).z
     v.v(2).x = *this.v(2).x: v.v(2).y = *this.v(2).y: v.v(2).z = *this.v(2).z
+    v.v(3).x = *this.v(3).x: v.v(3).y = *this.v(3).y: v.v(3).z = *this.v(3).z
     return v
 end function
 

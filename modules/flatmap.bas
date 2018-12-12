@@ -24,9 +24,23 @@ function FlatMap.heights(x as integer, y as integer) as short
         return 0
     end if
 end function
+function FlatMap.ceils(x as integer, y as integer) as short
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        return this._ceils(x+((this._h-1-y) shl 10))
+    else
+        return 0
+    end if
+end function
 function FlatMap.colors(x as integer, y as integer) as integer
     if x >= 0 and x < this._w and y >= 0 and y < this._h then
         return this._colors(x+((this._h-1-y) shl 10))
+    else
+        return 0
+    end if
+end function
+function FlatMap.ceilcolors(x as integer, y as integer) as integer
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        return this._ccolors(x+((this._h-1-y) shl 10))
     else
         return 0
     end if
@@ -76,9 +90,21 @@ function Flatmap.setHeight(x as integer, y as integer, new_h as integer) as Flat
     end if
     return @this
 end function
+function Flatmap.setCeil(x as integer, y as integer, new_h as integer) as FlatMap ptr
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        this._ceils(x+((this._h-1-y) shl 10)) = new_h
+    end if
+    return @this
+end function
 function Flatmap.setColor(x as integer, y as integer, new_c as integer) as FlatMap ptr
     if x >= 0 and x < this._w and y >= 0 and y < this._h then
         this._colors(x+((this._h-1-y) shl 10)) = new_c
+    end if
+    return @this
+end function
+function Flatmap.setCeilColor(x as integer, y as integer, new_c as integer) as FlatMap ptr
+    if x >= 0 and x < this._w and y >= 0 and y < this._h then
+        this._ccolors(x+((this._h-1-y) shl 10)) = new_c
     end if
     return @this
 end function
@@ -129,6 +155,19 @@ function FlatMap.getHeightAvg(x as integer, y as integer, size as integer) as in
     'return sum / size
     return max
 end function
+function FlatMap.getCeilAvg(x as integer, y as integer, size as integer) as integer
+    dim mx as integer, my as integer
+    dim min as double
+    min = 99999
+    for my = y to y+size-1
+        for mx = x to x+size-1
+            if this.ceils(mx, my) < min then
+                min = this.ceils(mx, my)
+            end if
+        next mx
+    next my
+    return min
+end function
 function FlatMap.getColorAvg(x as integer, y as integer, size as integer) as integer
     dim mx as integer, my as integer
     dim colr as integer
@@ -153,6 +192,21 @@ function FlatMap.getColorAvg(x as integer, y as integer, size as integer) as int
     'next my
     'size *= size
     'return rgb(r / size, g / size, b / size)
+end function
+function FlatMap.getCeilColorAvg(x as integer, y as integer, size as integer) as integer
+    dim mx as integer, my as integer
+    dim colr as integer
+    dim min as double
+    min = 99999
+    for my = y to y+size-1
+        for mx = x to x+size-1
+            if this.ceils(mx, my) < min then
+                min = this.ceils(mx, my)
+                colr = this.ceilcolors(mx, my)
+            end if
+        next mx
+    next my
+    return colr
 end function
 function FlatMap.getCallbackAvg(x as integer, y as integer, size as integer) as sub(byref x_dx as uinteger, byref x_dy as uinteger, byref y_dx as uinteger, byref y_dy as uinteger)
     dim mx as integer, my as integer

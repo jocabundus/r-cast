@@ -12,11 +12,16 @@ type Vector
 end type
 
 declare function vectorFromAngle(a as double) as Vector
-declare function vectorToRight(u as Vector) as Vector
-declare function vectorToUnit(u as Vector) as Vector
+declare function vectorRight(u as Vector) as Vector
+declare function vectorUnit(u as Vector) as Vector
 declare function vectorDot(u as Vector, v as Vector) as double
 declare function vectorCross(u as Vector, v as Vector) as Vector
 declare function vectorSize(u as Vector) as double
+declare function vectorTranslate(u as Vector, x as double, y as double, z as double) as Vector
+declare function vectorRotateX(u as Vector, a as double) as Vector
+declare function vectorRotateY(u as Vector, a as double) as Vector
+declare function vectorRotateZ(u as Vector, a as double) as Vector
+declare function vectorMake2d(u as Vector, xScale as double, yScale as double, zxScale as double, zyScale as double) as Vector
 declare operator + (byref u as Vector, byref v as Vector) as Vector
 declare operator - (byref u as Vector, byref v as Vector) as Vector
 declare operator * (byref u as Vector, byref v as Vector) as Vector
