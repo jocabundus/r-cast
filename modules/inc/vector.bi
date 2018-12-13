@@ -29,3 +29,4 @@ declare operator / (byref u as Vector, byref v as Vector) as Vector
 declare operator * (byref u as Vector, byref d as double) as Vector
 declare operator / (byref u as Vector, byref d as double) as Vector
 declare operator = (byref u as Vector, byref d as double) as boolean
+declare operator - (byref u as Vector) as Vector

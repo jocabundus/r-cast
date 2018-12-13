@@ -126,6 +126,7 @@ type Game_Session
     forward as Vector
     angleY as double
     midline as double
+    height as double
 end type
 
 dim shared Game as Game_Session
@@ -236,6 +237,94 @@ sub loadMeshFile(filename as string, meshIndex as integer=0)
 
 end sub
 
+sub doCollisionCheckX(forward as Vector)
+
+    dim map as FlatMap ptr
+    dim hx as integer
+    dim hit as integer
+    dim p as Vector
+    dim hgt as double
+    dim nph as double
+    dim g as double
+    g = 0.1656
+    
+    map = @highres
+    
+    p   = Game.position
+    hgt = Game.height
+    hit = 0
+    
+    nph = map->heights(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x-g)
+    nph = map->heights(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x+g)
+    nph = map->heights(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x-g)
+    nph = map->heights(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x+g)
+    nph = map->ceils(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x-g)
+    nph = map->ceils(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x+g)
+    nph = map->ceils(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x-g)
+    nph = map->ceils(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x+g)
+    if hit then
+        Game.position.x = iif(forward.x > 0, hx-(g+0.0001), hx+(1+g+0.0001))
+    end if
+
+end sub
+
+sub doCollisionCheckY(forward as Vector)
+
+    dim map as FlatMap ptr
+    dim hy as integer
+    dim hit as integer
+    dim p as Vector
+    dim hgt as double
+    dim nph as double
+    dim g as double
+    g = 0.1656
+    
+    map = @highres
+    
+    p   = Game.position
+    hgt = Game.height
+    hit = 0
+    
+    nph = map->heights(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y-g)
+    nph = map->heights(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y-g)
+    nph = map->heights(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y+g)
+    nph = map->heights(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y+g)
+    nph = map->ceils(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y-g)
+    nph = map->ceils(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y-g)
+    nph = map->ceils(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y+g)
+    nph = map->ceils(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y+g)
+    if hit then
+        Game.position.y = iif(forward.y > 0, hy-(g+0.0001), hy+(1+g+0.0001))
+    end if
+
+end sub
+
+sub doCollisionCheckZ(forward as Vector)
+
+    dim ph as double
+    dim nph as double
+    dim p as Vector
+    dim hgt as double
+    dim map as FlatMap ptr
+    
+    return
+    
+    map = @highres
+    
+    p   = Game.position
+    hgt = Game.height
+    
+    nph = map->heights(int(p.x), int(p.y))*0.01+hgt
+    if p.z < nph then
+       Game.position.z = nph
+    end if
+    nph = map->ceils(int(p.x), int(p.y))*0.01
+    if nph-p.z < 0 and nph-p.z >= -hgt then
+       Game.position.z = nph-0.01
+    end if
+
+end sub
+
 sub main()
 
     dim px as double, py as double
@@ -244,10 +333,11 @@ sub main()
     dim f as double
     dim a as double
     
-    px = 150.5 'MAP_WIDTH * 0.5 + 0.5
-    py = 512.5 'MAP_HEIGHT * 0.5 + 0.5
+    Game.position.x = 155.5 'MAP_WIDTH * 0.5 + 0.5
+    Game.position.y = 512.5 'MAP_HEIGHT * 0.5 + 0.5
+    Game.position.z = 10
+    Game.height     = 0.25
     pa = 0
-    ph = 1
     
     dim vf as Vector
     dim vr as Vector
@@ -304,7 +394,6 @@ sub main()
     
     dim ha as double
     dim height as double
-    height = 0.25
     
     dim rayCallback as sub(byref x_dx as uinteger, byref x_dy as uinteger, byref y_dx as uinteger, byref y_dy as uinteger)
     
@@ -320,15 +409,31 @@ sub main()
     
     dim down as Vector
     
-    dim girth as double
-    girth = 0.1656
     'loadHorse()
     loadMeshFile "shopvac.dae"
     
     UpdateSpeed()
     seconds = 0
     SDL_SetRelativeMouseMode(1)
+    mousestate = SDL_GetRelativeMouseState(@mx, @my)
+    pa = 0
+    midline = HALF_Y
+    my = 0
     do
+        px = Game.position.x
+        py = Game.position.y
+        ph = Game.position.z
+        height = Game.height
+    
+        if px <= 150 then
+            atmosphereFactor = 0.005+(150-px)*0.005
+            colorSky   = &hffc2be
+            colorSky   = rgbAdd(&hffc2be, -128)
+        else
+            atmosphereFactor = 0.005
+            colorSky   = rgbMix(&hbec2ff, &h000000, 1.0-(0.5*(1-(seconds mod 600)/300)), 2.0*(1-(seconds mod 600)/300))
+        end if
+    
         delta = UpdateSpeed()
         seconds += delta
         
@@ -366,22 +471,28 @@ sub main()
         
         '//  FALLING!!!!!!  ============================================
         static dv as double
+        dim cheight as double
+        dim fheight as double
         if mode = 2 then
             dim g as double
             g = 10
             dv += g*delta
             ph -= dv*delta
         
-            nph = map->heights(int(px), int(py))*0.01+height
+            nph = map->heights(int(px), int(py))*0.01
+            fheight = nph
+            nph += height
             if ph < nph then
                ph = nph
                dv = 0
             end if
             nph = map->ceils(int(px), int(py))*0.01
+            cheight = nph
             if nph-ph < 0 and nph-ph >= -height then
                ph = nph-0.01
-               dv = -dv
+               dv = g*delta
             end if
+            Game.position.z = ph
         end if
         '//=============================================================
         
@@ -412,186 +523,77 @@ sub main()
         if keys[SDL_SCANCODE_RIGHT] then
             pa -= 100*delta
         end if
+        if keys[SDL_SCANCODE_PAGEUP] then
+            midline += 300*delta
+        end if
+        if keys[SDL_SCANCODE_PAGEDOWN] then
+            midline -= 300*delta
+        end if
+        if keys[SDL_SCANCODE_0] then
+            midline = HALF_Y
+            pa = 0
+        end if
         
         if keys[SDL_SCANCODE_LCTRL]  then height = 0.125 else height = 0.25 'speed *= 1.5
         if keys[SDL_SCANCODE_LSHIFT] then speed *= 0.25
         
+        Game.height = height
+        
         if keys[SDL_SCANCODE_A] then
             select case mode
             case 1
-                vf = vectorFromAngle(pa)
-                vf = vectorRight(vf)
-                vf.x = vf.x * speed * delta
-                vf.y = vf.y * speed * delta
-                px -= vf.x
-                py -= vf.y
+                vf  = -vectorRight(Game.forward) * speed * delta
+                Game.position += vf
             case 2
-                vf = vectorFromAngle(pa)
-                vf = vectorRight(vf)
-                vf.x = vf.x * speed * delta
-                vf.y = vf.y * speed * delta
-                px -= vf.x
-                hit = 0
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                if hit then
-                    px = iif(vf.x < 0, hx-(girth+0.0001), hx+(1+girth+0.0001))
-                end if
-                hit = 0
-                py -= vf.y
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                if hit then
-                    py = iif(vf.y < 0, hy-(girth+0.0001), hy+(1+girth+0.0001))
-                end if
+                vf  = -vectorRight(Game.forward) * speed * delta
+                Game.position.x += vf.x: doCollisionCheckX(vf)
+                Game.position.y += vf.y: doCollisionCheckY(vf)
             end select
         end if
         if keys[SDL_SCANCODE_D] then
             select case mode
             case 1
-                vf = vectorFromAngle(pa)
-                vf = vectorRight(vf)
-                vf.x = vf.x * speed * delta
-                vf.y = vf.y * speed * delta
-                px += vf.x
-                py += vf.y
+                vf  = vectorRight(Game.forward) * speed * delta
+                Game.position += vf
             case 2
-                vf = vectorFromAngle(pa)
-                vf = vectorRight(vf)
-                vf.x = vf.x * speed * delta
-                vf.y = vf.y * speed * delta
-                px += vf.x
-                hit = 0
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                if hit then
-                    px = iif(vf.x > 0, hx-(girth+0.0001), hx+(1+girth+0.0001))
-                end if
-                hit = 0
-                py += vf.y
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                if hit then
-                    py = iif(vf.y > 0, hy-(girth+0.0001), hy+(1+girth+0.0001))
-                end if
+                vf  = vectorRight(Game.forward) * speed * delta
+                Game.position.x += vf.x: doCollisionCheckX(vf)
+                Game.position.y += vf.y: doCollisionCheckY(vf)
             end select
         end if
         if keys[SDL_SCANCODE_UP] or keys[SDL_SCANCODE_W] then
             select case mode
             case 1
-                vf   = vectorFromAngle(pa)
-                vf.z = ha*0.003333
-                vf   = vectorUnit(vf)
-                px += vf.x * speed * delta
-                py += vf.y * speed * delta
-                ph += vf.z * speed * delta
+                Game.position += Game.forward * speed * delta
             case 2
-                vf   = vectorFromAngle(pa)
-                vf   = vectorUnit(vf)
-                vf.x = vf.x * speed * delta
-                vf.y = vf.y * speed * delta 
-                px += vf.x
-                hit = 0
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                if hit then
-                    px = iif(vf.x > 0, hx-(girth+0.0001), hx+(1+girth+0.0001))
-                end if
-                hit = 0
-                py += vf.y
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                if hit then
-                    py = iif(vf.y > 0, hy-(girth+0.0001), hy+(1+girth+0.0001))
-                end if
+                vf = Game.forward * speed * delta
+                Game.position.x += vf.x: doCollisionCheckX(vf)
+                Game.position.y += vf.y: doCollisionCheckY(vf)
+                Game.position.z += vf.z: doCollisionCheckZ(vf)
                 strafeAngle += delta*120*speed
             end select
         end if
         if keys[SDL_SCANCODE_DOWN] or keys[SDL_SCANCODE_S] then
             select case mode
             case 1
-                vf = vectorFromAngle(pa)
-                px -= vf.x * speed * delta
-                py -= vf.y * speed * delta
+                Game.position += Game.forward * speed * delta
             case 2
-                vf   = vectorFromAngle(pa)
-                vf   = vectorUnit(vf)
-                vf.x = vf.x * speed * delta
-                vf.y = vf.y * speed * delta 
-                px -= vf.x
-                hit = 0
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px-girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px-girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hx = int(px+girth)
-                if hit then
-                    px = iif(vf.x < 0, hx-(girth+0.0001), hx+(1+girth+0.0001))
-                end if
-                hit = 0
-                py -= vf.y
-                nph = map->heights(int(px-girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px+girth), int(py-girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py-girth)
-                nph = map->heights(int(px-girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->heights(int(px+girth), int(py+girth))*0.01+height: if nph-ph > 0.1375 then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px-girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px+girth), int(py-girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py-girth)
-                nph = map->ceils(int(px-girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                nph = map->ceils(int(px+girth), int(py+girth))*0.01+height: if nph-ph < height then hit = 1: hy = int(py+girth)
-                if hit then
-                    py = iif(vf.y < 0, hy-(girth+0.0001), hy+(1+girth+0.0001))
-                end if
+                vf = -Game.forward * speed * delta
+                Game.position.x += vf.x: doCollisionCheckX(vf)
+                Game.position.y += vf.y: doCollisionCheckY(vf)
+                Game.position.z += vf.z: doCollisionCheckZ(vf)
+                strafeAngle -= delta*120*speed
             end select
         end if
         if keys[SDL_SCANCODE_SPACE] and (dv = 0) then
             if mode = 1 then
-                ph += speed * delta
+                Game.position.z += speed * delta: doCollisionCheckZ(Game.forward)
             else
-                'dv = -0.3333
                 dv = -3
             end if
         end if
         if keys[SDL_SCANCODE_TAB] then
-            ph -= speed * delta
+            Game.position.z -= speed * delta: doCollisionCheckZ(Game.forward)
         end if
         if keys[SDL_SCANCODE_1] then
             mode = 1
@@ -607,9 +609,10 @@ sub main()
         dim za as double
         za = ha*(90/SCREEN_Y)
         
-        Game.position.x = px
-        Game.position.y = py
-        Game.position.z = ph
+        if za <= -90 then za = -90
+        if za >=  90 then za =  90
+        if za = 0 then za = 0.0001
+        
         Game.angleY = pa
         vf = Vector(1, 0, 0)
         vf = vectorRotateY(vf, za)
@@ -617,15 +620,49 @@ sub main()
         Game.forward = vectorUnit(vf)
         Game.midline = midline
         
+        px = Game.position.x
+        py = Game.position.y
+        ph = Game.position.z
+        
         '// RAYCAST BEGIN  =============================================
+        dim vps as Vector
+        dim vpr as Vector
+        dim down as Vector
+        dim dz as double
+        
+        if za < 0 then
+            dz = ph-map->heights(int(px), int(py))*0.01
+        else
+            dz = map->ceils(int(px), int(py))*0.01-ph
+        end if
         
         vf    = vectorFromAngle(pa)
         vr    = vectorRight(vf)
-        vray.x = vf.x-vr.x*abs(fov)
-        vray.y = vf.y-vr.y*abs(fov)
-        vr.x /= HALF_X: vr.y /= HALF_X
-        vr.x *= abs(fov)
-        vr.y *= abs(fov)
+        
+        Game.forward.z = 0
+        
+        'vray.x = vf.x*(1-abs(Game.forward.z))-vr.x*abs(1)*(1-abs(Game.forward.z))
+        'vray.y = vf.y*(1-abs(Game.forward.z))-vr.y*abs(1)*(1-abs(Game.forward.z))
+        vray = vf-vr*(1-abs(Game.forward.z))
+        'vr.x /= HALF_X: vr.y /= HALF_X
+        vps.x = -vf.x-vr.x
+        vps.y = -vf.y-vr.y
+        vps *= abs(Game.forward.z)*dz
+        vpr = vr*abs(Game.forward.z)*dz
+        'vps *= abs(Game.forward.z)
+        'vr.x *= abs(1)*(1-abs(Game.forward.z))
+        'vr.y *= abs(1)*(1-abs(Game.forward.z))
+        vr *= (1-abs(Game.forward.z))
+        vr /= HALF_X
+        vpr /= HALF_X
+        
+        'down.x = Game.forward.x*dz
+        'down.y = Game.forward.y*dz
+        down = Game.forward*(dz/abs(Game.forward.z))
+        
+        dim downSize as double
+        downSize = vectorSize(down)
+        
         
         dim colr as integer
         dim xDistMax as integer, yDistMax as integer
@@ -709,12 +746,18 @@ sub main()
         pixelNow = pixels
         
         dim fx as double, fy as double, fo as double
-            dim c as integer    
-            dim ix as integer, iy as integer
+        dim c as integer    
+        dim ix as integer, iy as integer
+        dim savePx as double, savePy as double
         xPix = -1
+        
         for f = 0 to SCREEN_X-1
             xPix += 1
             map = @highres
+            
+            savePx = px: savePy = py
+            px = px+vps.x: py = py+vps.y
+            
         
             bottom = SCREEN_Y-1
             
@@ -802,9 +845,10 @@ sub main()
             sliceSize = HEIGHT_RATIO / dist
             dim h as double
             dim ch as double
-            h = map->heights(int(px+down.x), int(py+down.y))*0.01
-            ch = map->ceils(int(px+down.x), int(py+down.y))*0.01
+            h   = map->heights(int(px), int(py))*0.01
+            ch  = map->ceils(int(px), int(py))*0.01
             top = midline+int(sliceSize*((ph-h)+strafeValue))+1
+            
             cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
             ctop = 0
             yPix = bottom
@@ -828,9 +872,9 @@ sub main()
             end if
             '// draw top
             if top <= bottom then
-                colr = map->colors(int(px+down.x), int(py+down.y))
-                colr = rgbAdd(colr, map->normals(int(px+down.x), int(py+down.y)))
-                dat = map->datas(int(px+down.x), int(py+down.y))
+                colr = map->colors(int(px), int(py))
+                colr = rgbAdd(colr, map->normals(int(px), int(py)))
+                dat = map->datas(int(px), int(py))
                                 
                 dc = (dist shr PREC_SHIFT)*atmosphereFactor
                 dc = dc*dc*dc
@@ -861,6 +905,7 @@ sub main()
             h = map->heights(lx, ly)*0.01
             ch = map->ceils(lx, ly)*0.01
             top = midline+int(sliceSize*((ph-h)+strafeValue))+1
+            
             cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
             if cbottom >= bottom then cbottom = bottom
             if top <= ctop then top = ctop
@@ -901,8 +946,6 @@ sub main()
             y_ex = 0
             y_di = abs(PREC/vray.y)
             
-            'z_di = abs(1/down.z)
-            
             dim xAlign as integer, yAlign as integer
             dim switchedToMed as integer, switchedToLow as integer
             dim switchedToSub as integer
@@ -923,7 +966,6 @@ sub main()
                 else
                     y_dy  += y_ay: y_dx += y_ax
                     yDist += y_di
-                    'zDist += zy_di
                     'if map->callbacks(y_dx, y_dy) <> 0 then
                     '    map->callbacks(y_dx, y_dy)(0, 0, y_dx, y_dy)
                     'end if
@@ -939,13 +981,16 @@ sub main()
                     dist = yDist
                 end if
                 
-                
                 sliceSize = HEIGHT_RATIO / dist
                 if dist > distMax then exit do
                 
                 '// draw top
                 top = midline+int(sliceSize*((ph-h)+strafeValue))+1
                 cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
+                
+                'dim zdist as double
+                'zdist = (dist/PREC)/Game.forward.z
+                'top -= (HEIGHT_RATIO/(dist*dz*abs(1-Game.forward.z)))
                 
                 dc = 0
                 if cbottom >= bottom then cbottom = bottom
@@ -974,7 +1019,7 @@ sub main()
                     colr = map->colors(lx, ly)
                     colr = rgbAdd(colr, map->normals(lx, ly))
                     dat = map->datas(lx, ly)
-                                    
+                    
                     dc = (dist shr PREC_SHIFT)*atmosphereFactor
                     dc = dc*dc*dc
                     dc1 = 1/(dc+1)
@@ -1046,6 +1091,9 @@ sub main()
                 h = map->heights(lx, ly)*0.01
                 ch = map->ceils(lx, ly)*0.01
                 top = midline+int(sliceSize*((ph-h)+strafeValue))+1
+                
+                'top -= (HEIGHT_RATIO/(dist*dz*abs(1-Game.forward.z)))
+                
                 cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
                 if cbottom >= bottom then cbottom = bottom
                 if top <= ctop then top = ctop
@@ -1076,11 +1124,11 @@ sub main()
                     colr = map->colors(lx, ly)
                     colr = rgbAdd(colr, map->normals(lx, ly))
                     colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
-                    if dc = 0 then
+                    'if dc = 0 then
                         dc = (dist shr PREC_SHIFT)*atmosphereFactor
                         dc = dc*dc*dc
                         dc1 = 1/(dc+1)
-                    end if
+                    'end if
                     'ic = iif(xDist > yDist, 10, -10)
                     
                     wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
@@ -1137,9 +1185,12 @@ sub main()
             end if
             
             vray.x += vr.x: vray.y += vr.y
+            vps.x  += vpr.x: vps.y += vpr.y
             'if f = HALF_X then
             '    game_font.writeText( "MAX: "+str(int(dist)), 3, 12 )
             'end if
+            
+            px = savePx: py = savePy
             
         next f
         
@@ -1171,8 +1222,7 @@ sub main()
                 m.sort()
                 m.startOver()
                 c = 0
-                dc = (red(highres.ceilcolors(px, py)) + grn(red(highres.ceilcolors(px, py))) + blu(red(highres.ceilcolors(px, py))))/3
-                if dc > 128 then dc = 0 else dc = int((128-dc)/32)
+                dc = highres.ceilcolors(int(px), int(py))
                 do
                     mp = m.getNext()
                     if mp = 0 then exit do
@@ -1230,7 +1280,7 @@ sub main()
                             if g > 255 then g = 255
                             if b > 255 then b = 255
                             r *= 0.85: g *= 0.85: b *= 0.85
-                            colr = rgbMix(rgb(r, g, b), &h000000, 1.0, dc*0.875)
+                            colr = rgbMix(rgb(r, g, b), dc, 1.0, 2.0)
                             drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, colr, pixels, pitch)
                             'drawLine(v4.v(0).x, v4.v(0).y, v4.v(1).x, v4.v(1).y, &hff0000, pixels, pitch)
                             
@@ -1254,15 +1304,17 @@ sub main()
         
         '// RAYCAST END  ===============================================
         game_font.writeText( "FPS: "+str(fps), 3, 3 )
-        game_font.writeText( "X: "+str(int(px)), 3, 15 )
-        game_font.writeText( "Y: "+str(int(py)), 3, 27 )
-        game_font.writeText( "Z: "+str(int(ph)), 3, 39 )
-        'game_font.writeText( "PA: "+str(int(pa)), 3, 39 )
-        game_font.writeText( "VX: "+str(Game.forward.x), 3, 51 )
-        game_font.writeText( "VY: "+str(Game.forward.y), 3, 63 )
-        game_font.writeText( "VZ: "+str(Game.forward.z), 3, 75 )
-        game_font.writeText( "PITCH: "+str(ha*(90/SCREEN_Y)), 3, 87 )
-        game_font.writeText( "HA: "+str(ha), 3, 99 )
+        game_font.writeText( "X: "+str(cast(single, px)), 3, 15 )
+        game_font.writeText( "Y: "+str(cast(single, py)), 3, 27 )
+        game_font.writeText( "Z: "+str(cast(single, ph)), 3, 39 )
+        game_font.writeText( "FZ: "+str(cast(single, fheight)), 3, 51 )
+        game_font.writeText( "CZ: "+str(cast(single, cheight)), 3, 63 )
+        game_font.writeText( "VX: "+str(cast(single, Game.forward.x)), 3, 75 )
+        game_font.writeText( "VY: "+str(cast(single, Game.forward.y)), 3, 87 )
+        game_font.writeText( "VZ: "+str(cast(single, Game.forward.z)), 3, 99 )
+        game_font.writeText( "PITCH: "+str(cast(single, ha*(90/SCREEN_Y))), 3, 111 )
+        game_font.writeText( "HA: "+str(cast(single, ha)), 3, 123 )
+        
         'game_font.writeText( "ZDI  : "+str(z_di), 3, 99 )
         'game_font.writeText( "MLINE: "+str(midline), 3, 15 )
         game_font.writeText( "+", HALF_X-4, HALF_Y-4 )

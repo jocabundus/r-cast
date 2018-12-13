@@ -141,3 +141,6 @@ end operator
 operator = (byref u as Vector, byref v as Vector) as boolean
 	return ((u.x = v.x) and (u.y = v.y) and (u.z = v.z))
 end operator
+operator - (byref u as Vector) as Vector
+    return Vector(-u.x, -u.y, -u.z)
+end operator
