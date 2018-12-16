@@ -30,7 +30,7 @@ function DartManager.fire(start as Vector, forward as Vector, speed as double, f
 
     dim i as integer
     dim idx as integer = -1
-    for i = 0 to 1023
+    for i = 0 to 255
 	if this._idx(i) = 0 then
 	    this._idx(i) = 1
 	    idx = i
@@ -104,7 +104,7 @@ function DartManager.cycle(speed as double = 1) as DartManager ptr
     dim num_darts as integer
     dim prev as integer
     
-    dim tocall(1024) as Dart
+    dim tocall(256) as Dart
     dim numtocall as integer = 0
     
     i = this._firstidx
@@ -203,7 +203,7 @@ end function
 
 function DartManager.clearDarts() as DartManager ptr
     dim i as integer
-    for i = 0 to 1023
+    for i = 0 to 255
 	this._idx(i) = 0
     next i
     this._lastidx = -1

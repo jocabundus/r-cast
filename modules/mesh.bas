@@ -362,6 +362,11 @@ function Mesh.addPolyFast(p as MeshPoly ptr) as Mesh ptr
     return @this
 end function
 function Mesh.copy(m as Mesh ptr) as Mesh ptr
+    this._polyCount = 0
+    this._normalCount = 0
+    this._vertexCount = 0
+    this._current = 0
+    this._z = 0
     dim i as integer
     for i = 0 to m->getVertexCount()-1
         this.addVertexFast(m->getVertex(i))
