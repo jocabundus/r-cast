@@ -17,16 +17,19 @@ args(6)  = "modules/flatmap.bas -lib -x lib/libflatmap.a"
 args(7)  = "modules/bsp.bas     -lib -x lib/libbsp.a"
 args(8)  = "modules/dart.bas    -lib -x lib/libdart.a"
 args(9)  = "modules/dartmanager.bas -lib -x lib/libdartmanager.a"
+args(10) = "modules/mob.bas         -lib -x lib/libmob.a"
+args(11) = "modules/mobmanager.bas  -lib -x lib/libmobmanager.a"
+args(12) = "modules/sound.bas       -lib -x lib/libsound.a"
 
 print "Building modules..."
 dim i as integer
 dim percent as double
 dim s as string
-for i = 0 to 9
+for i = 0 to 12
     if exec(pathToFbc, args(i)) = -1 then
         print "ERROR while running fbc with: "+args(i)
     else
-        percent = (i/9)
+        percent = (i/12)
         s = "["
         s += string(int(percent*25), "=")
         s += string(25-int(percent*25), " ")

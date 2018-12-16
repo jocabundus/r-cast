@@ -3,15 +3,15 @@
 randomize timer
 
 #define FULLSCREEN 1
-#define SCREEN_X   532'352'532'1920'352
-#define SCREEN_Y   300'198'300'1080'198
+#define SCREEN_X   532'352'352'1280'532'352'532'1920'352
+#define SCREEN_Y   300'198'198'720'300'198'300'1080'198
 #define HALF_X     SCREEN_X \ 2
 #define HALF_Y     SCREEN_Y \ 2
 
 
 #define PREC         (2^14)
 #define PREC_SHIFT   14
-#define MAX_DISTANCE (4096 shl PREC_SHIFT) '300
+dim shared MAX_DISTANCE as integer = (1024 shl PREC_SHIFT) '300
 #define MAX_INT      (2^16)
 
 dim shared HEIGHT_RATIO as integer
@@ -26,6 +26,9 @@ HEIGHT_RATIO = SCREEN_Y shl PREC_SHIFT
 #include once "modules/inc/bsp.bi"
 #include once "modules/inc/rgb.bi"
 #include once "modules/inc/dartmanager.bi"
+#include once "modules/inc/mob.bi"
+#include once "modules/inc/mobmanager.bi"
+#include once "modules/inc/sound.bi"
 
 '// GRAPHICS FUNCTIONS  ================================================
 declare sub gfx_dice(sprites() as SDL_RECT, filename as string, img_w as integer, img_h as integer, sp_w as integer, sp_h as integer, scale_x as double=1.0, scale_y as double=0)
@@ -52,6 +55,13 @@ dim shared gfxRenderer as SDL_Renderer ptr
 dim shared gfxSprites as SDL_Texture ptr
 
 'SDL_Init( SDL_INIT_AUDIO or SDL_INIT_JOYSTICK or SDL_INIT_HAPTIC )
+if SDL_Init( SDL_INIT_AUDIO ) = 0 then
+    SOUND_Init
+else
+    print "sound error"
+    end
+end if
+
 SDL_Init( SDL_INIT_VIDEO )
 
 if FULLSCREEN then SDL_ShowCursor( 0 )
@@ -96,6 +106,32 @@ colorWater = rgbMix(hue(ang+340, 0.8), colorSky, 1.0, 0.5)
 
 atmosphereFactor = 0.005 '0.015 '0.005
 
+SOUND_SetMusicVolume 1.0
+SOUND_SetSoundVolume 1.0
+
+SOUND_SetMusic "ogg/explore.ogg"
+SOUND_AddSound "huh", "sfx/huh.wav", , , 0.3333
+SOUND_AddSound "step", "sfx/step.wav", , , 0.25
+SOUND_AddSound "step0", "sfx/step0.wav", , , 0.50
+SOUND_AddSound "step1", "sfx/step1.wav", , , 0.50
+SOUND_AddSound "step2", "sfx/dirtystep.wav", , , 0.50
+SOUND_AddSound "shoot0", "sfx/shoot1.wav", , , 1.00
+SOUND_AddSound "shoot1", "sfx/shoot5.wav", , , 1.00
+'SOUND_AddSound "shoot2", "sfx/boom3.wav", , , 1.00
+SOUND_AddSound "shoot2", "sfx/shoot8.wav", , , 1.00
+
+SOUND_PlayMusic
+
+dim shared meshCount as integer = 0
+dim shared meshes(64) as Mesh
+dim shared meshPositions(64) as Vector
+dim i as integer
+for i = 0 to 63
+    meshPositions(i).x = 160+rnd(1)*704
+    meshPositions(i).y = 160+rnd(1)*704
+    meshPositions(i).z = highres.heights(int(meshPositions(i).x), int(meshPositions(i).y))*0.01+1
+next i
+
 loadMap highres, medres, lowres
 main
 
@@ -108,9 +144,6 @@ SDL_Quit
 '//=====================================================================
 
 end
-
-dim shared meshCount as integer = 0
-dim shared meshes(64) as Mesh
 
 enum MeshIds
     horse = 0
@@ -132,7 +165,6 @@ end type
 dim shared Game as Game_Session
 dim shared pixels as integer ptr
 dim shared pitch as integer
-'Game.getDarts()->setBounds(0,0,Game.getGrid()->getWidth()*SPRITE_W,Game.getGrid()->getHeight()*SPRITE_H)
 
 function rndint(from as integer, too as integer) as integer
     return int(((too-from)+1)*rnd(1))+from
@@ -194,6 +226,29 @@ sub loadHorse()
     next y
     'meshes(MeshIds.horse) = m.copy()
     meshCount += 1
+end sub
+
+sub loadSymbol(meshId as integer)
+    restore symbols
+    dim x as integer, y as integer
+    dim m as Mesh
+    dim c as integer
+    dim row as string
+    dim scale as double
+    scale = .1
+    dim i as integer
+    for i = 0 to 5
+        for y = 4 to 0 step -1
+            read row
+            for x = 1 to 16
+                if mid(row, x, 1) = "#" then
+                    meshes(meshId+i).addCube((x-7.5), (y-7.5), 0, scale, scale, scale)
+                end if
+            next x
+        next y
+        meshCount += 1
+    next i
+    
 end sub
 
 sub loadMeshFile(filename as string, meshIndex as integer=0)
@@ -387,7 +442,8 @@ sub main()
     dim darts as DartManager
     darts.setBounds(0, 0, 0, highres.w, highres.h, 10000)
     darts.setRenderCallback(@dart_render)
-    'darts.setDefaultCollideCallback(@flame_collide)
+    
+    dim mobs as MobManager
     
     dim nph as double
     midline += (HALF_Y/2)
@@ -397,7 +453,7 @@ sub main()
     
     dim rayCallback as sub(byref x_dx as uinteger, byref x_dy as uinteger, byref y_dx as uinteger, byref y_dy as uinteger)
     
-    dim walkingSpeed as double = 5.0 '3.5 '5.0
+    dim walkingSpeed as double = 4.0 '3.5 '5.0
     dim flyingSpeed as double = 30
     'dim pitch as double
     dim mode as integer = 1
@@ -410,7 +466,8 @@ sub main()
     dim down as Vector
     
     'loadHorse()
-    loadMeshFile "shopvac.dae"
+    loadMeshFile "shopvac.dae", 0
+    loadSymbol 1
     
     UpdateSpeed()
     seconds = 0
@@ -425,10 +482,16 @@ sub main()
         ph = Game.position.z
         height = Game.height
     
-        if px <= 150 then
-            atmosphereFactor = 0.005+(150-px)*0.005
+        if px <= 140 then
+            atmosphereFactor = 0.005+(150-px)*0.002
             colorSky   = &hffc2be
             colorSky   = rgbAdd(&hffc2be, -128)
+            MAX_DISTANCE = 100 SHL PREC_SHIFT
+        elseif px <= 150 then
+            colorSky   = &hffc2be
+            colorSky   = rgbAdd(&hffc2be, -128)
+            colorSky   = rgbMix(colorSky, &h000000, abs(px-150))
+            MAX_DISTANCE = 1024 SHL PREC_SHIFT
         else
             atmosphereFactor = 0.005
             colorSky   = rgbMix(&hbec2ff, &h000000, 1.0-(0.5*(1-(seconds mod 600)/300)), 2.0*(1-(seconds mod 600)/300))
@@ -505,13 +568,19 @@ sub main()
         end if
         
         static fireTimer as double
+        static mouseLetGo as integer
         'fireTimer = iif(fireTimer-delta < 0, 0, fireTimer-delta)
         fireTimer -= delta
         if fireTimer < 0 then fireTimer = 0
-        if mousedown_left and (fireTimer = 0) then
-            fireTimer = 0.5
+        if (mousedown_left and (fireTimer = 0)) or (mousedown_left and mouseLetGo) then
+            fireTimer = 0.19
             darts.fire(Game.position, Game.forward, 100, 1)_
                 ->setCollideCallback(@dart_collide)
+            SOUND_PlaySound "shoot2"
+            mouseLetGo = 0
+        end if
+        if mousedown_left = 0 then
+            mouseLetGo = 1
         end if
         
         dim hit as integer
@@ -534,18 +603,24 @@ sub main()
             pa = 0
         end if
         
-        if keys[SDL_SCANCODE_LCTRL]  then height = 0.125 else height = 0.25 'speed *= 1.5
-        if keys[SDL_SCANCODE_LSHIFT] then speed *= 0.25
+        if keys[SDL_SCANCODE_LSHIFT]  then
+            height = 0.125
+            speed *= 0.25
+        else
+            height = 0.25
+        end if
+        'if keys[SDL_SCANCODE_LSHIFT] then speed *= 0.25
+        if keys[SDL_SCANCODE_LCTRL] then speed *= 1.45
         
         Game.height = height
         
         if keys[SDL_SCANCODE_A] then
             select case mode
             case 1
-                vf  = -vectorRight(Game.forward) * speed * delta
+                vf  = -vectorRight(Game.forward) * speed * 0.75 * delta
                 Game.position += vf
             case 2
-                vf  = -vectorRight(Game.forward) * speed * delta
+                vf  = -vectorRight(Game.forward) * speed * 0.75 * delta
                 Game.position.x += vf.x: doCollisionCheckX(vf)
                 Game.position.y += vf.y: doCollisionCheckY(vf)
             end select
@@ -553,14 +628,20 @@ sub main()
         if keys[SDL_SCANCODE_D] then
             select case mode
             case 1
-                vf  = vectorRight(Game.forward) * speed * delta
+                vf  = vectorRight(Game.forward) * speed * 0.75 * delta
                 Game.position += vf
             case 2
-                vf  = vectorRight(Game.forward) * speed * delta
+                vf  = vectorRight(Game.forward) * speed * 0.75 * delta
                 Game.position.x += vf.x: doCollisionCheckX(vf)
                 Game.position.y += vf.y: doCollisionCheckY(vf)
             end select
         end if
+        'static stepTimer as double
+        'static stepo as integer
+        dim last as double
+        last = strafeAngle mod 180
+        'stepTimer -= delta * iif(keys[SDL_SCANCODE_LCTRL], 1.45, 1)
+        'if stepTimer < 0 then stepTimer = 0
         if keys[SDL_SCANCODE_UP] or keys[SDL_SCANCODE_W] then
             select case mode
             case 1
@@ -570,26 +651,46 @@ sub main()
                 Game.position.x += vf.x: doCollisionCheckX(vf)
                 Game.position.y += vf.y: doCollisionCheckY(vf)
                 Game.position.z += vf.z: doCollisionCheckZ(vf)
-                strafeAngle += delta*120*speed
+                if dv = 0 then
+                    strafeAngle += delta*150*iif(keys[SDL_SCANCODE_LSHIFT], speed*6, speed)
+                end if
+                'if stepTimer = 0 then
+                '    SOUND_PlaySound iif(stepo and 1, "step", "step0")
+                '    stepo += 1
+                '    stepTimer = 0.3333
+                'end if
             end select
         end if
         if keys[SDL_SCANCODE_DOWN] or keys[SDL_SCANCODE_S] then
             select case mode
             case 1
-                Game.position += Game.forward * speed * delta
+                Game.position -= Game.forward * speed * delta
             case 2
-                vf = -Game.forward * speed * delta
+                vf = -Game.forward * speed * 0.75 * delta
                 Game.position.x += vf.x: doCollisionCheckX(vf)
                 Game.position.y += vf.y: doCollisionCheckY(vf)
                 Game.position.z += vf.z: doCollisionCheckZ(vf)
-                strafeAngle -= delta*120*speed
+                if dv = 0 then
+                    strafeAngle -= delta*150*iif(keys[SDL_SCANCODE_LSHIFT], speed*6, speed)
+                end if
+                'if stepTimer = 0 then
+                '    SOUND_PlaySound iif(stepo and 1, "step", "step0")
+                '    stepo += 1
+                '    stepTimer = 0.3333
+                'end if
             end select
+        end if
+        static stepo as integer
+        if (dv = 0) and ((strafeAngle mod 180) >= 90) and (last < 90) then
+            SOUND_PlaySound iif(stepo and 1, "step0", "step0")
+            stepo += 1
         end if
         if keys[SDL_SCANCODE_SPACE] and (dv = 0) then
             if mode = 1 then
-                Game.position.z += speed * delta: doCollisionCheckZ(Game.forward)
+                Game.position.z += speed * 0.5 * delta: doCollisionCheckZ(Game.forward)
             else
-                dv = -3
+                dv = -3*(1+(speed-walkingSpeed)*0.2)
+                SOUND_PlaySound "huh"
             end if
         end if
         if keys[SDL_SCANCODE_TAB] then
@@ -1201,28 +1302,36 @@ sub main()
             'dim fx as double, fy as double
             'dim ix as integer, iy as integer
             dim v3 as Vector3
+            dim v4 as Vector3
             dim vCenter as Vector
+            dim showNormals as integer
+            
+            showNormals = 0
             
             vCenter = Vector(0, 0, 0)
             
             SDL_SetRenderDrawColor(gfxRenderer, &hff, 0, 0, 0)
-            dim hh as double
-            hh = highres.heights(512, 512)*0.01+3
-            
             for i = 0 to meshCount-1
                 m.copy(@meshes(i))
-                m.rotateY(180)
-                'm.rotateX(Easing.quad_easein(fireTimer*2)*10)
-                'm.rotateX(-90)
-                'm.rotateX(90)
-                'm.rotateY((seconds*120) mod 360)
-                'm.translate(py-512, -(ph-hh), 512-px)
-                'm.rotateY(-pa)
-                m.translate(2-strafeValue*70, -2-abs(strafeValue*50), 5-strafeValue*20-Easing.quad_easein(fireTimer*2)*3)
+                if i > 0 then
+                    m.rotateY((seconds*120) mod 360)
+                    m.translate(Game.position.y-meshPositions(i).y, meshPositions(i).z-Game.position.z, meshPositions(i).x-Game.position.x)
+                    m.rotateY(-pa)
+                else
+                    m.rotateY(180)
+                    m.rotateX(Easing.quad_easein(fireTimer*2)*10)
+                    m.rotateX(-90)
+                    m.rotateX(90)
+                    if fireTimer = 0 then
+                        m.translate(2-strafeValue*70, -2-abs(strafeValue*50), 5-strafeValue*20-Easing.quad_easein(fireTimer*2)*3)
+                    else
+                        m.translate(2, -2, 5-Easing.quad_easein(fireTimer*2)*9)
+                    end if
+                end if
                 m.sort()
                 m.startOver()
+                
                 c = 0
-                dc = highres.ceilcolors(int(px), int(py))
                 do
                     mp = m.getNext()
                     if mp = 0 then exit do
@@ -1230,29 +1339,27 @@ sub main()
                     v3 = mp->copy()
                     dim vc as Vector, dot as double
                     
-                    'vc = vectorToUnit(vectorCross(v3.v(2)-v3.v(0), v3.v(1)-v3.v(0)))
-                    vc = v3.v(3)
-                    dim vff as Vector
-                    vff.x = 1 '-vf.y
-                    vff.y = -1'hh-ph'ha*0.3*.02625
-                    vff.z = 1'vf.x
-                    dot = vectorDot(vc, vectorUnit(vff))
-                    if dot <= 0 then
-                        dot = (vectorDot(vc, vectorUnit(Vector(vf.x, ha*0.001875, vf.y))))
-                        'v3.translate(py-512, -(ph-hh), 512-px)
-                        'v3.rotateY(-pa)
+                    if i = 0 then
+                        vc = v3.v(3)
+                        dot = vectorDot(vc, vectorUnit(Vector(0, 0, 1)))
+                    else
+                        vc = vectorUnit(vectorCross(v3.v(2)-v3.v(0), v3.v(1)-v3.v(0)))
+                        dot = vectorDot(vc, Vector(0, 0, 1))
+                    end if
+                    
+                    if dot <= 0 or i = 0 then
+                        dot = (vectorDot(vc, Vector(1, -1, 1)))
                         
-                        'dim v4 as Vector3
-                        'v4.v(0) = (v3.v(0)+v3.v(1)+v3.v(2))/3
-                        'v4.v(1) = v4.v(0)
-                        'v4.v(2) = v3.v(2)
-                        'v4.v(1) += vc*0.1
+                        if showNormals then
+                            v4.v(0) = (v3.v(0)+v3.v(1)+v3.v(2))/3
+                            v4.v(1) = v4.v(0)
+                            v4.v(2) = v3.v(2)
+                            v4.v(1) += vc*0.1
+                        end if
                         
                         if (v3.v(0).z > 0) and (v3.v(1).z > 0) and (v3.v(2).z > 0) then
                             v3.make2d(SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
-                            'v4.make2d(SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
-                            'v3.translate(0, midline-HALF_Y, 0)
-                            'v4.translate(0, midline-HALF_Y, 0)
+                            if i > 0 then v3.translate(0, midline-HALF_Y, 0)
                             'fx = v3.v(0).x: fy = v3.v(0).y
                             'ix = cast(integer, fx): iy = cast(integer, fy)
                             'if ix >= 0 and ix < SCREEN_X and iy >= 0 and iy < SCREEN_Y then
@@ -1273,16 +1380,34 @@ sub main()
                                 'pixelNow = pixels+ix+iy*pitch
                                 '*pixelNow = rgb(255, 0, 255)
                             'end if
-                            r = &hff+dot*50
-                            g = &he4+dot*50
-                            b = &hd8+dot*50
+                            if i = 0 then
+                                dc = highres.ceilcolors(int(px), int(py))
+                                dc += iif(dc < 96, (96-25)+fireTimer*25, fireTimer*25)
+                                r = &hff+dot*50
+                                g = &he4+dot*50
+                                b = &hd8+dot*50
+                            else
+                                r = &hff+dot*30
+                                g = &he4+dot*30
+                                b = &hd8+dot*30
+                            end if
+                            
                             if r > 255 then r = 255
                             if g > 255 then g = 255
                             if b > 255 then b = 255
                             r *= 0.85: g *= 0.85: b *= 0.85
-                            colr = rgbMix(rgb(r, g, b), dc, 1.0, 2.0)
+                            if i = 0 then
+                                colr = rgbMix(rgb(r, g, b), dc, 1.0, 2.0)
+                            else
+                                colr = rgb(r, g, b)
+                            end if
                             drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, colr, pixels, pitch)
-                            'drawLine(v4.v(0).x, v4.v(0).y, v4.v(1).x, v4.v(1).y, &hff0000, pixels, pitch)
+                            
+                            if showNormals then
+                                v4.make2d(SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
+                                if i > 0 then v4.translate(0, midline-HALF_Y, 0)
+                                drawLine(v4.v(0).x, v4.v(0).y, v4.v(1).x, v4.v(1).y, &hff0000, pixels, pitch)
+                            end if
                             
                             'SDL_RenderDrawLine(gfxRenderer, v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y)
                             'SDL_RenderDrawLine(gfxRenderer, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y)
@@ -1297,12 +1422,15 @@ sub main()
             next i
             
             darts.cycle(delta)
+            mobs.cycle(delta)
         
         SDL_UnlockTexture(texture)
         SDL_RenderCopy(gfxRenderer, texture, null, null)
         
         
         '// RAYCAST END  ===============================================
+        'game_font.writeText( str(int(strafeAngle)), 3, 3 )
+        if 0 then
         game_font.writeText( "FPS: "+str(fps), 3, 3 )
         game_font.writeText( "X: "+str(cast(single, px)), 3, 15 )
         game_font.writeText( "Y: "+str(cast(single, py)), 3, 27 )
@@ -1314,6 +1442,7 @@ sub main()
         game_font.writeText( "VZ: "+str(cast(single, Game.forward.z)), 3, 99 )
         game_font.writeText( "PITCH: "+str(cast(single, ha*(90/SCREEN_Y))), 3, 111 )
         game_font.writeText( "HA: "+str(cast(single, ha)), 3, 123 )
+        end if
         
         'game_font.writeText( "ZDI  : "+str(z_di), 3, 99 )
         'game_font.writeText( "MLINE: "+str(midline), 3, 15 )
@@ -1704,7 +1833,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     
     'dim r as Vector
     dim r as integer
-    dim h as double = 400
+    dim h as double = 600
     dim rv as Vector = vectorFromAngle(rnd(1)*360)
     v = vectorFromAngle(rnd(1)*360)
     
@@ -1731,19 +1860,19 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
                 end if
                 
                 highres.setWall(x, y, 0)
-                'highres.setHeight(x, y, _
-                '  ((abs(sin(x*3*TO_RAD)*cos(y*3*TO_RAD))+sin(x*3*TO_RAD))*-h _
-                '- (abs(sin(y*TO_RAD)))*-h _
-                '+ (abs(cos(y/10*TO_RAD)))*-h) _
-                ')
-                
                 highres.setHeight(x, y, _
-                    cos((x*(360/highres.w)+r0)*TO_RAD)*-h _
-                  + sin((y*(360/highres.h)+r1)*TO_RAD)*-h _
-                  - sin((x*(360/highres.w)+r2)*TO_RAD)*-h _
-                  + cos((y*(360/highres.h)+r3)*TO_RAD)*-h _
-                  + fractalSomething3(Vector(x,y)) _ '*-h _
+                  ((abs(sin(x*3*TO_RAD)*cos(y*3*TO_RAD))+sin(x*3*TO_RAD))*-h _
+                - (abs(sin(y*TO_RAD)))*-h _
+                + (abs(cos(y/10*TO_RAD)))*-h) _
                 )
+                
+                'highres.setHeight(x, y, _
+                '    cos((x*(360/highres.w)+r0)*TO_RAD)*-h _
+                '  + sin((y*(360/highres.h)+r1)*TO_RAD)*-h _
+                '  - sin((x*(360/highres.w)+r2)*TO_RAD)*-h _
+                '  + cos((y*(360/highres.h)+r3)*TO_RAD)*-h _
+                '  + fractalSomething3(Vector(x,y)) _ '*-h _
+                ')
                 
                 if highres.heights(x, y) < -int(h*0.95) then
                     highres.setHeight(x, y, -int(h*0.95))
@@ -2147,6 +2276,43 @@ data "................"
 data "................"
 data "................"
 data "................"
+
+symbols:
+data "..###..........."
+data "..#..#.#.##.##.."
+data "..#..#.#.#.#.#.."
+data "..#..#.#.#...#.."
+data "..###..#.#...#.."
+
+data "..###......###.."
+data ".#....#..#.#..#."
+data ".###..#..#.###.."
+data "....#.#..#.#..#."
+data ".####.####.###.."
+
+data ".####.....###..."
+data ".#...####.#..#.."
+data ".###.#..#.###..."
+data ".#...#..#.#..#.."
+data ".#...####.#...#."
+
+data "................"
+data "....#######....."
+data "................"
+data "....#######....."
+data "................"
+
+data ".....##..##....."
+data "...##......##..."
+data ".##..........##."
+data "...##......##..."
+data ".....##..##....."
+
+data ".....######....."
+data ".....#....#....."
+data ".........#......"
+data ".......#........"
+data ".......#........"
 
 empty:
 data "................"
