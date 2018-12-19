@@ -28,9 +28,13 @@ function Mesh.sort() as Mesh ptr
     dim z1 as double
     for i = 0 to this._polyCount-1
         for n = i+1 to this._polyCount-1
-            z0 = (this._polys(i).v(0)->z+this._polys(i).v(1)->z+this._polys(i).v(2)->z)/3
-            z1 = (this._polys(n).v(0)->z+this._polys(n).v(1)->z+this._polys(n).v(2)->z)/3
-            if z0 < z1 then
+            z0 = iif(this._polys(i).v(0)->z > this._polys(i).v(1)->z,_
+                 iif(this._polys(i).v(0)->z > this._polys(i).v(2)->z, this._polys(i).v(0)->z, this._polys(i).v(2)->z),_
+                 iif(this._polys(i).v(1)->z > this._polys(i).v(2)->z, this._polys(i).v(1)->z, this._polys(i).v(2)->z))
+            z1 = iif(this._polys(n).v(0)->z > this._polys(n).v(1)->z,_
+                 iif(this._polys(n).v(0)->z > this._polys(n).v(2)->z, this._polys(n).v(0)->z, this._polys(n).v(2)->z),_
+                 iif(this._polys(n).v(1)->z > this._polys(n).v(2)->z, this._polys(n).v(1)->z, this._polys(n).v(2)->z))
+            if z0 > z1 then
                 swap this._polys(i), this._polys(n)
             end if
         next n

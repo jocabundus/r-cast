@@ -22,6 +22,7 @@ HEIGHT_RATIO = SCREEN_Y shl PREC_SHIFT
 #include once "modules/inc/gfont.bi"
 #include once "modules/inc/vector.bi"
 #include once "modules/inc/mesh.bi"
+#include once "modules/inc/flatmapcell.bi"
 #include once "modules/inc/flatmap.bi"
 #include once "modules/inc/bsp.bi"
 #include once "modules/inc/rgb.bi"
@@ -30,17 +31,23 @@ HEIGHT_RATIO = SCREEN_Y shl PREC_SHIFT
 #include once "modules/inc/mobmanager.bi"
 #include once "modules/inc/sound.bi"
 
+#include once "game/inc/mobs.bi"
+#include once "game/inc/draw.bi"
+
 '// GRAPHICS FUNCTIONS  ================================================
 declare sub gfx_dice(sprites() as SDL_RECT, filename as string, img_w as integer, img_h as integer, sp_w as integer, sp_h as integer, scale_x as double=1.0, scale_y as double=0)
 declare sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, colr as integer, pixels as integer ptr, pitch as integer)
-declare sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, colr as integer, pixels as integer ptr, pitch as integer)
-declare sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, colr as integer, pixels as integer ptr, pitch as integer)
-declare sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, colr as integer, pixels as integer ptr, pitch as integer)
+declare sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
+declare sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
+declare sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
 declare sub loadMeshFile(filename as string, meshIndex as integer = 0)
 '// END GRAPHICS FUNCTIONS  ============================================
 
 declare sub main()
 declare sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
+
+#define MAP_WIDTH  1024
+#define MAP_HEIGHT 1024
 
 '// SHARED  ============================================================
 dim shared highres as FlatMap = FlatMap(MAP_WIDTH, MAP_HEIGHT)
@@ -66,7 +73,7 @@ SDL_Init( SDL_INIT_VIDEO )
 
 if FULLSCREEN then SDL_ShowCursor( 0 )
 
-gfxWindow = SDL_CreateWindow( "Ashes of Eternity", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_X, SCREEN_Y, SDL_WINDOW_FULLSCREEN_DESKTOP )
+gfxWindow = SDL_CreateWindow( "White Horse", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_X, SCREEN_Y, SDL_WINDOW_FULLSCREEN_DESKTOP )
 gfxRenderer = SDL_CreateRenderer( gfxWindow, -1, null )
 SDL_RenderSetLogicalSize( gfxRenderer, SCREEN_X, SCREEN_Y )
 SDL_SetRenderDrawBlendMode( gfxRenderer, SDL_BLENDMODE_NONE )
@@ -75,6 +82,41 @@ dim shared game_font as GFONT = GFONT(@gfxRenderer)
 game_font.load("font.bmp", 256, 256, 8, 8, GFONT_W/8)
 
 '//=====================================================================
+
+dim shared tileColors(1023) as integer
+
+function addTileColor( colr as integer ) as integer
+
+    dim r as integer
+    dim g as integer
+    dim b as integer
+
+    'r = red(colr) shr 3
+    'g = grn(colr) shr 3
+    'b = blu(colr) shr 3
+    
+    'colr = rgb(r shl 3, g shl 3, b shl 3)
+    if colr = 0 then return 0
+
+    dim i as integer
+    for i = 1 to 1023
+        if tileColors(i) = colr then
+            return i
+        end if
+        if tileColors(i) = 0 then
+            tileColors(i) = colr
+            return i
+        end if
+    next i
+    
+    return 0
+
+end function
+
+enum CellFlags
+    water  = &h01
+    clouds = &h02
+end enum
 
 type ColorScheme
     base as integer
@@ -122,17 +164,19 @@ SOUND_AddSound "shoot2", "sfx/shoot8.wav", , , 1.00
 
 SOUND_PlayMusic
 
+loadMap highres, medres, lowres
+
 dim shared meshCount as integer = 0
 dim shared meshes(64) as Mesh
 dim shared meshPositions(64) as Vector
 dim i as integer
-for i = 0 to 63
+for i = 0 to 8
     meshPositions(i).x = 160+rnd(1)*704
     meshPositions(i).y = 160+rnd(1)*704
-    meshPositions(i).z = highres.heights(int(meshPositions(i).x), int(meshPositions(i).y))*0.01+1
+    meshPositions(i).z = highres.getCell(int(meshPositions(i).x)+0.5, int(meshPositions(i).y)+0.5)->getFloorHeight()*0.01+0.75
+    'highres.getCell(int(meshPositions(i).x), int(meshPositions(i).y), &hffff00)
 next i
 
-loadMap highres, medres, lowres
 main
 
 '// SHUTDOWN SDL  ======================================================
@@ -175,6 +219,7 @@ sub dart_render(d as Dart ptr)
 '	DrawOnMap Game.sprites(d->getFrameStart()+int(d->getCount())), d->getX(), d->getY(), 0
     dim v as Vector
     dim hd as double
+    dim dist as integer
     
     'm.translate(py-512, -(ph-hh), 512-px)
     
@@ -188,18 +233,19 @@ sub dart_render(d as Dart ptr)
     'v = vectorTranslate(v, Game.position.y-512, -hd, 512-Game.position.x)
     v = vectorRotateY(v, -Game.angleY)
     if v.z < 1 then return
+    dist = int(v.x) and 255
     size = SCREEN_Y/v.z
     v = vectorMake2d(v, SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
     v = vectorTranslate(v, 0, Game.midline-HALF_Y, 0)
     
     size *= 0.5
-    drawTriangle(v.x-size, v.y-size, v.x+size, v.y-size, v.x, v.y, &hff0000, pixels, pitch)
+    drawTriangle(v.x-size, v.y-size, v.x+size, v.y-size, v.x, v.y, dist, &hff0000, pixels, pitch)
 
 end sub
 
 function dart_collide(x as double, y as double, z as double) as integer
 
-    if highres.heights(x, y)*0.01 > z+0.5 then
+    if highres.getCell(x, y)->getFloorHeight()*0.01 > z+0.5 then
         return 1
     else
         return 0
@@ -228,21 +274,21 @@ sub loadHorse()
     meshCount += 1
 end sub
 
-sub loadSymbol(meshId as integer)
-    restore symbols
+sub loadRunes(meshStartId as integer)
     dim x as integer, y as integer
     dim m as Mesh
     dim c as integer
     dim row as string
     dim scale as double
     scale = .1
+    restore runes
     dim i as integer
-    for i = 0 to 5
+    for i = 0 to 8
         for y = 4 to 0 step -1
             read row
-            for x = 1 to 16
+            for x = 1 to 18
                 if mid(row, x, 1) = "#" then
-                    meshes(meshId+i).addCube((x-7.5), (y-7.5), 0, scale, scale, scale)
+                    meshes(meshStartId+i).addCube((x-7.5), (y-7.5), 0, scale, scale, scale)
                 end if
             next x
         next y
@@ -309,14 +355,14 @@ sub doCollisionCheckX(forward as Vector)
     hgt = Game.height
     hit = 0
     
-    nph = map->heights(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x-g)
-    nph = map->heights(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x+g)
-    nph = map->heights(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x-g)
-    nph = map->heights(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x+g)
-    nph = map->ceils(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x-g)
-    nph = map->ceils(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x+g)
-    nph = map->ceils(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x-g)
-    nph = map->ceils(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x+g)
+    nph = map->getCell(int(p.x-g), int(p.y-g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x-g)
+    nph = map->getCell(int(p.x+g), int(p.y-g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x+g)
+    nph = map->getCell(int(p.x-g), int(p.y+g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x-g)
+    nph = map->getCell(int(p.x+g), int(p.y+g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hx = int(p.x+g)
+    nph = map->getCell(int(p.x-g), int(p.y-g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x-g)
+    nph = map->getCell(int(p.x+g), int(p.y-g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x+g)
+    nph = map->getCell(int(p.x-g), int(p.y+g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x-g)
+    nph = map->getCell(int(p.x+g), int(p.y+g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hx = int(p.x+g)
     if hit then
         Game.position.x = iif(forward.x > 0, hx-(g+0.0001), hx+(1+g+0.0001))
     end if
@@ -340,14 +386,14 @@ sub doCollisionCheckY(forward as Vector)
     hgt = Game.height
     hit = 0
     
-    nph = map->heights(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y-g)
-    nph = map->heights(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y-g)
-    nph = map->heights(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y+g)
-    nph = map->heights(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y+g)
-    nph = map->ceils(int(p.x-g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y-g)
-    nph = map->ceils(int(p.x+g), int(p.y-g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y-g)
-    nph = map->ceils(int(p.x-g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y+g)
-    nph = map->ceils(int(p.x+g), int(p.y+g))*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y+g)
+    nph = map->getCell(int(p.x-g), int(p.y-g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y-g)
+    nph = map->getCell(int(p.x+g), int(p.y-g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y-g)
+    nph = map->getCell(int(p.x-g), int(p.y+g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y+g)
+    nph = map->getCell(int(p.x+g), int(p.y+g))->getFloorHeight()*0.01+hgt: if nph-p.z > 0.1375 then hit = 1: hy = int(p.y+g)
+    nph = map->getCell(int(p.x-g), int(p.y-g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y-g)
+    nph = map->getCell(int(p.x+g), int(p.y-g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y-g)
+    nph = map->getCell(int(p.x-g), int(p.y+g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y+g)
+    nph = map->getCell(int(p.x+g), int(p.y+g))->getCeilHeight()*0.01+hgt: if nph-p.z < hgt then hit = 1: hy = int(p.y+g)
     if hit then
         Game.position.y = iif(forward.y > 0, hy-(g+0.0001), hy+(1+g+0.0001))
     end if
@@ -369,11 +415,11 @@ sub doCollisionCheckZ(forward as Vector)
     p   = Game.position
     hgt = Game.height
     
-    nph = map->heights(int(p.x), int(p.y))*0.01+hgt
+    nph = map->getCell(int(p.x), int(p.y))->getFloorHeight()*0.01+hgt
     if p.z < nph then
        Game.position.z = nph
     end if
-    nph = map->ceils(int(p.x), int(p.y))*0.01
+    nph = map->getCell(int(p.x), int(p.y))->getCeilHeight()*0.01
     if nph-p.z < 0 and nph-p.z >= -hgt then
        Game.position.z = nph-0.01
     end if
@@ -440,7 +486,7 @@ sub main()
     dim delta as double
     
     dim darts as DartManager
-    darts.setBounds(0, 0, 0, highres.w, highres.h, 10000)
+    darts.setBounds(0, 0, 0, highres.getWidth(), highres.getHeight(), 10000)
     darts.setRenderCallback(@dart_render)
     
     dim mobs as MobManager
@@ -467,7 +513,7 @@ sub main()
     
     'loadHorse()
     loadMeshFile "shopvac.dae", 0
-    loadSymbol 1
+    loadRunes 1
     
     UpdateSpeed()
     seconds = 0
@@ -526,7 +572,7 @@ sub main()
         if midline < -HALF_Y then midline = -HALF_Y
         if midline >  SCREEN_Y*1.5 then midline = SCREEN_Y*1.5
         'if midline > HALF_Y*10 then midline = HALF_Y*10
-        fov = 1+abs(midline-HALF_Y)*0.00125*(300/SCREEN_Y)
+        fov = 1'1+abs(midline-HALF_Y)*0.00125*(300/SCREEN_Y)
         
         map = @highres
         
@@ -542,14 +588,14 @@ sub main()
             dv += g*delta
             ph -= dv*delta
         
-            nph = map->heights(int(px), int(py))*0.01
+            nph = map->getCell(int(px), int(py))->getFloorHeight()*0.01
             fheight = nph
             nph += height
             if ph < nph then
                ph = nph
                dv = 0
             end if
-            nph = map->ceils(int(px), int(py))*0.01
+            nph = map->getCell(int(px), int(py))->getCeilHeight()*0.01
             cheight = nph
             if nph-ph < 0 and nph-ph >= -height then
                ph = nph-0.01
@@ -732,9 +778,9 @@ sub main()
         dim dz as double
         
         if za < 0 then
-            dz = ph-map->heights(int(px), int(py))*0.01
+            dz = ph-map->getCell(int(px), int(py))->getFloorHeight()*0.01
         else
-            dz = map->ceils(int(px), int(py))*0.01-ph
+            dz = map->getCell(int(px), int(py))->getCeilHeight()*0.01-ph
         end if
         
         vf    = vectorFromAngle(pa)
@@ -765,7 +811,7 @@ sub main()
         downSize = vectorSize(down)
         
         
-        dim colr as integer
+        dim colr as uinteger
         dim xDistMax as integer, yDistMax as integer
         dim distMax as integer
         dim i as integer
@@ -805,6 +851,7 @@ sub main()
         dim xPix as integer, yPix as integer
         dim cyPix as integer
         dim pt as integer
+        dim zBufferValue as uinteger
         
         SDL_LockTexture(texture, null, @pixels, @pitch)
         pitch = (pitch shr 2)
@@ -850,6 +897,7 @@ sub main()
         dim c as integer    
         dim ix as integer, iy as integer
         dim savePx as double, savePy as double
+        dim cell as FlatMapCell ptr
         xPix = -1
         
         for f = 0 to SCREEN_X-1
@@ -867,20 +915,20 @@ sub main()
             yDistMax = 0
             fx = 0: fy = 0
             
-            if px < 0 or px >= map->w then
+            if px < 0 or px >= map->getWidth() then
                 fx += abs(iif(vray.x > 0, -px, MAP_WIDTH-px)/vray.x)
             end if
             
-            fx += abs(iif(vray.x > 0, map->w-1-px, -px)/vray.x)
+            fx += abs(iif(vray.x > 0, map->getWidth()-1-px, -px)/vray.x)
             
             if fx > MAX_INT then fx = MAX_INT
             xDistMax = fx*PREC
             
-            if py < 0 or py >= map->h then
+            if py < 0 or py >= map->getHeight() then
                 fy += abs(iif(vray.y > 0, -py, MAP_HEIGHT-py)/vray.y)
             end if
             
-            fy += abs(iif(vray.y > 0, map->h-1-py, -py)/vray.y)
+            fy += abs(iif(vray.y > 0, map->getHeight()-1-py, -py)/vray.y)
             
             if fy > MAX_INT then fy = MAX_INT
             yDistMax = fy*PREC
@@ -890,7 +938,7 @@ sub main()
             
             '// CLOSEST INTERSECTION  ==================================
             xHit = 0
-            if px >= 0 and px < map->w then
+            if px >= 0 and px < map->getWidth() then
                 fx = iif(vray.x > 0, int(px+1)-px, int(px)-px)
             else
                 fx = iif(vray.x > 0, -px, MAP_WIDTH-px)
@@ -911,7 +959,7 @@ sub main()
             x_dx = dx: x_dy = dy
             
             yHit = 0
-            if py >= 0 and py < map->h then
+            if py >= 0 and py < map->getHeight() then
                 fy = iif(vray.y > 0, int(py+1)-py, int(py)-py)
             else
                 fy = iif(vray.y > 0, -py, MAP_HEIGHT-py)
@@ -944,10 +992,11 @@ sub main()
             lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
             
             sliceSize = HEIGHT_RATIO / dist
+            zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
             dim h as double
             dim ch as double
-            h   = map->heights(int(px), int(py))*0.01
-            ch  = map->ceils(int(px), int(py))*0.01
+            h   = map->getCell(int(px), int(py))->getFloorHeight()*0.01
+            ch  = map->getCell(int(px), int(py))->getCeilHeight()*0.01
             top = midline+int(sliceSize*((ph-h)+strafeValue))+1
             
             cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
@@ -956,14 +1005,16 @@ sub main()
             cyPix = ctop
             pixelNow = pixels+pitch*yPix+xPix
             cPixelNow = pixels+pitch*cyPix+xPix
+            cell = map->getCell(int(px), int(py))
             '// draw ctop
             if cbottom >= bottom then cbottom = bottom
             if top <= ctop then top = ctop
             if cbottom >= ctop then
-                colr = map->ceilcolors(int(px), int(py))
+                colr = tileColors(cell->getCeilTile())
                 if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
                 if colr <> &hff00ff then
                     'colr = rgbAdd(colr, map->normals(int(px), int(py)))
+                    colr = ((colr and &h00ffffff) or zBufferValue)
                     while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
                 else
                     cPixelNow += pitch*(cbottom-cyPix)
@@ -973,15 +1024,15 @@ sub main()
             end if
             '// draw top
             if top <= bottom then
-                colr = map->colors(int(px), int(py))
-                colr = rgbAdd(colr, map->normals(int(px), int(py)))
-                dat = map->datas(int(px), int(py))
+                colr = tileColors(cell->getFloorTile())
+                colr = rgbAdd(colr, cell->getNormal())
+                dat = map->getCell(int(px), int(py))->getFlags()
                                 
                 dc = (dist shr PREC_SHIFT)*atmosphereFactor
                 dc = dc*dc*dc
                 dc1 = 1/(dc+1)
                 skyR  = (colorSky  shr 16) and 255: skyG  = (colorSky  shr 8) and 255: skyB  = (colorSky  and 255)
-                if dat = Datas.water then
+                if cell->hasFlag( CellFlags.water ) then
                     dim add as integer
                     add = 7-(int(((cos(int(px)+seconds*0.002)*TO_RAD)*(sin(seconds*0.002-int(py))*TO_RAD)*3000000)) and 15)
                     r = &h5c+add: g = &h53+add: b = &hdb+add
@@ -999,31 +1050,35 @@ sub main()
                 if b > 255 then b = 255: if b < 0 then b = 0
                 colr = rgb(r, g, b)
                 if top < 0 then top = 0
+                colr = ((colr and &h00ffffff) or zBufferValue)
                 while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                 bottom = top-1
             end if
             '// draw side
-            h = map->heights(lx, ly)*0.01
-            ch = map->ceils(lx, ly)*0.01
+            cell = map->getCell(lx, ly)
+            h = cell->getFloorHeight()*0.01
+            ch = cell->getCeilHeight()*0.01
             top = midline+int(sliceSize*((ph-h)+strafeValue))+1
             
             cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
             if cbottom >= bottom then cbottom = bottom
             if top <= ctop then top = ctop
             if top <= bottom then
-                colr = map->colors(lx, ly)
-                colr = rgbAdd(colr, map->normals(lx, ly))
+                colr = tileColors(cell->getFloorTile())
+                colr = rgbAdd(colr, cell->getNormal())
                 colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
                 if top < 0 then top = 0
+                colr = ((colr and &h00ffffff) or zBufferValue)
                 while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                 bottom = top-1
             end if
             if cbottom >= ctop then
-                colr = map->ceilcolors(lx, ly)
+                colr = tileColors(cell->getCeilTile())
                 if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
                 if colr <> &hff00ff then
                     'colr = rgbAdd(colr, map->normals(lx, ly))
                     colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
+                    colr = colr or zBufferValue
                     while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
                 else
                     cPixelNow += pitch*(cbottom-cyPix)
@@ -1083,6 +1138,7 @@ sub main()
                 end if
                 
                 sliceSize = HEIGHT_RATIO / dist
+                zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
                 if dist > distMax then exit do
                 
                 '// draw top
@@ -1097,7 +1153,7 @@ sub main()
                 if cbottom >= bottom then cbottom = bottom
                 if top <= ctop then top = ctop
                 if cbottom >= ctop then
-                    colr = map->ceilcolors(lx, ly)
+                    colr = tileColors(cell->getCeilTile())
                     if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
                     if colr <> &hff00ff then
                         if dc = 0 then
@@ -1108,6 +1164,7 @@ sub main()
                             colr = rgbMix(colr, colr, 1, dc1)
                         end if
                         'colr = rgbAdd(colr, map->normals(lx, ly))
+                        colr = ((colr and &h00ffffff) or zBufferValue)
                         while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
                     else
                         cPixelNow += pitch*(cbottom-cyPix)
@@ -1117,15 +1174,14 @@ sub main()
                 end if
                 if top <= bottom then
                 
-                    colr = map->colors(lx, ly)
-                    colr = rgbAdd(colr, map->normals(lx, ly))
-                    dat = map->datas(lx, ly)
+                    colr = tileColors(cell->getFloorTile())
+                    colr = rgbAdd(colr, cell->getNormal())
                     
                     dc = (dist shr PREC_SHIFT)*atmosphereFactor
                     dc = dc*dc*dc
                     dc1 = 1/(dc+1)
                     skyR  = (colorSky  shr 16) and 255: skyG  = (colorSky  shr 8) and 255: skyB  = (colorSky  and 255)
-                    if dat = Datas.water then
+                    if cell->hasFlag( CellFlags.water ) then
                         dim add as integer
                         add = 7-(int(((cos(lx+seconds*0.002)*TO_RAD)*(sin(seconds*0.002-ly)*TO_RAD)*3000000)) and 15)
                         r = &h5c+add: g = &h53+add: b = &hdb+add
@@ -1145,6 +1201,7 @@ sub main()
                 
                     'drawLine f, top, f, bottom, colr, 0
                     if top < 0 then top = 0
+                    colr = ((colr and &h00ffffff) or zBufferValue)
                     while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                     bottom = top-1
                 end if
@@ -1189,8 +1246,9 @@ sub main()
                 
                 '// draw side
                 lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
-                h = map->heights(lx, ly)*0.01
-                ch = map->ceils(lx, ly)*0.01
+                cell = map->getCell(lx, ly)
+                h = cell->getFloorHeight()*0.01
+                ch = cell->getCeilHeight()*0.01
                 top = midline+int(sliceSize*((ph-h)+strafeValue))+1
                 
                 'top -= (HEIGHT_RATIO/(dist*dz*abs(1-Game.forward.z)))
@@ -1199,11 +1257,10 @@ sub main()
                 if cbottom >= bottom then cbottom = bottom
                 if top <= ctop then top = ctop
                 if cbottom >= ctop then
-                    colr = map->ceilcolors(lx, ly)
+                    colr = tileColors(cell->getCeilTile())
                     if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
                     if colr <> &hff00ff then
-                        dat = map->datas(lx, ly, 1)
-                        if dat <> Datas.clouds then
+                        if cell->hasFlag( CellFlags.clouds ) then
                             'colr = rgbAdd(colr, map->normals(lx, ly)+iif(xDist > yDist, 10, -10))
                             colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
                         end if
@@ -1214,6 +1271,7 @@ sub main()
                             colr = rgbMix(colr, colorSky, 1, dc)
                             colr = rgbMix(colr, colr, 1, dc1)
                         'end if
+                        colr = ((colr and &h00ffffff) or zBufferValue)
                         while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
                     else
                         cPixelNow += pitch*(cbottom-cyPix)
@@ -1222,8 +1280,8 @@ sub main()
                     ctop = cbottom+1
                 end if
                 if top <= bottom then
-                    colr = map->colors(lx, ly)
-                    colr = rgbAdd(colr, map->normals(lx, ly))
+                    colr = tileColors(cell->getFloorTile())
+                    colr = rgbAdd(colr, cell->getNormal())
                     colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
                     'if dc = 0 then
                         dc = (dist shr PREC_SHIFT)*atmosphereFactor
@@ -1250,6 +1308,7 @@ sub main()
                     colr = rgb(r, g, b)
                     'drawLine f, top, f, bottom, colr, 0
                     if top < 0 then top = 0
+                    colr = ((colr and &h00ffffff) or zBufferValue)
                     while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
                     bottom = top-1
                 end if
@@ -1292,6 +1351,8 @@ sub main()
             'end if
             
             px = savePx: py = savePy
+            
+            if bottom >= ctop then exit do
             
         next f
         
@@ -1358,6 +1419,8 @@ sub main()
                         end if
                         
                         if (v3.v(0).z > 0) and (v3.v(1).z > 0) and (v3.v(2).z > 0) then
+                            dim z as integer
+                            z = ((cast(integer, v3.v(0).z)-abs(dz))\(4*2.2222)) and 255 ' do mesh positions - player (should already be this?)
                             v3.make2d(SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
                             if i > 0 then v3.translate(0, midline-HALF_Y, 0)
                             'fx = v3.v(0).x: fy = v3.v(0).y
@@ -1381,17 +1444,19 @@ sub main()
                                 '*pixelNow = rgb(255, 0, 255)
                             'end if
                             if i = 0 then
-                                dc = highres.ceilcolors(int(px), int(py))
+                                cell = highres.getCell(int(px), int(py))
+                                dc = tileColors(cell->getCeilTile()) '// SHOULD BE RGBADD!!!
                                 dc += iif(dc < 96, (96-25)+fireTimer*25, fireTimer*25)
                                 r = &hff+dot*50
                                 g = &he4+dot*50
                                 b = &hd8+dot*50
+                                z = 0
                             else
                                 r = &hff+dot*30
                                 g = &he4+dot*30
                                 b = &hd8+dot*30
                             end if
-                            
+                            z = 0
                             if r > 255 then r = 255
                             if g > 255 then g = 255
                             if b > 255 then b = 255
@@ -1401,10 +1466,10 @@ sub main()
                             else
                                 colr = rgb(r, g, b)
                             end if
-                            drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, colr, pixels, pitch)
+                            drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, z, colr, pixels, pitch)
                             
                             if showNormals then
-                                v4.make2d(SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
+                                v4.make2d(SCREEN_X, SCREEN_Y, 2.25, 2.25)
                                 if i > 0 then v4.translate(0, midline-HALF_Y, 0)
                                 drawLine(v4.v(0).x, v4.v(0).y, v4.v(1).x, v4.v(1).y, &hff0000, pixels, pitch)
                             end if
@@ -1430,6 +1495,9 @@ sub main()
         
         '// RAYCAST END  ===============================================
         'game_font.writeText( str(int(strafeAngle)), 3, 3 )
+        game_font.writeText( "FPS: "+str(fps), 3, 3 )
+        game_font.writeText( "X: "+str(cast(single, px)), 3, 15 )
+        game_font.writeText( "Y: "+str(cast(single, py)), 3, 27 )
         if 0 then
         game_font.writeText( "FPS: "+str(fps), 3, 3 )
         game_font.writeText( "X: "+str(cast(single, px)), 3, 15 )
@@ -1458,7 +1526,7 @@ sub main()
 
 end sub
 
-sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, colr as integer, pixels as integer ptr, pitch as integer)
+sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
 
     dim dx as double, dy as double
     dim sx0 as double, sy0 as double
@@ -1502,7 +1570,9 @@ sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
         end if
         pixelNow = pixels+x+y*pitch
         while n <= l
-            *(pixelNow) = colr
+            if (*(pixelNow) shr 24) > z then
+                *(pixelNow) = colr
+            end if
             pixelNow += 1
             n += 1
         wend
@@ -1510,7 +1580,7 @@ sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
 
 end sub
 
-sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, colr as integer, pixels as integer ptr, pitch as integer)
+sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
 
     dim dx as double, dy as double
     dim sx0 as double, sy0 as double
@@ -1554,7 +1624,9 @@ sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
         end if
         pixelNow = pixels+x+y*pitch
         while n <= l
-            *(pixelNow) = colr
+            if (*(pixelNow) shr 24) > z then
+                *(pixelNow) = colr
+            end if
             pixelNow += 1
             n += 1
         wend
@@ -1562,7 +1634,7 @@ sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
 
 end sub
 
-sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, colr as integer, pixels as integer ptr, pitch as integer)
+sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
 
     dim mx as integer, my as integer
     
@@ -1584,13 +1656,13 @@ sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 
     if (y0 <> y1) and (y1 <> y2) then
         my = y1
         mx = int(x0+((x2-x0)/(y2-y0))*(my-y0))
-        drawTriangleTop(x0, y0, x1, y1, mx, my, colr, pixels, pitch)
-        drawTriangleBtm(mx, my, x1, y1, x2, y2, colr, pixels, pitch)
+        drawTriangleTop(x0, y0, x1, y1, mx, my, z, colr, pixels, pitch)
+        drawTriangleBtm(mx, my, x1, y1, x2, y2, z, colr, pixels, pitch)
     else
         if y1 = y2 then
-            drawTriangleTop(x0, y0, x1, y1, x2, y2, colr, pixels, pitch)
+            drawTriangleTop(x0, y0, x1, y1, x2, y2, z, colr, pixels, pitch)
         else
-            drawTriangleBtm(x0, y0, x1, y1, x2, y2, colr, pixels, pitch)
+            drawTriangleBtm(x0, y0, x1, y1, x2, y2, z, colr, pixels, pitch)
         end if
     end if
 
@@ -1722,6 +1794,7 @@ sub fractalDrill(startX as double, startY as double, startZ as integer = 0, u as
     dim xborder0 as integer
     dim xborder1 as integer
     dim height as double
+    dim cell as FlatMapCell ptr
     
     height = rnd(1)*3+1
     'if l < -64 then l = -64
@@ -1733,11 +1806,13 @@ sub fractalDrill(startX as double, startY as double, startZ as integer = 0, u as
         for yy = yborder0 to yborder1 step 1
             for xx = xborder0 to xborder1
                 l = (150-xx)*(150-xx)*0.0005
-                if not (xx > 150 and yy > 150 and xx < highres.w-150 and yy < highres.h-150) then
-                    if ((highres.heights(xx, yy) = 0) and (highres.ceils(xx, yy) = 0))_
-                    or (abs(highres.heights(xx, yy)-int(z-size)) < 2) then
-                        highres.setHeight(xx, yy, int(z-size))
-                        highres.setCeil(xx, yy, int(z+size*height))
+                if not (xx > 150 and yy > 150 and xx < highres.getWidth()-150 and yy < highres.getHeight()-150) then
+                    cell = highres.getCell(xx, yy)
+                    if cell = 0 then continue for
+                    if ((cell->getFloorHeight() = 0) and (cell->getCeilHeight() = 0))_
+                    or (abs(cell->getFloorHeight()-int(z-size)) < 2) then
+                        cell->setFloorHeight( int(z-size) )
+                        cell->setCeilHeight( int(z+size*height) )
                         'highres.setColor(xx, yy, rgbMix(highres.colors(xx, yy), colorSky, 1.0, 0.2))
                         'highres.setCeilColor(xx, yy, rgbMix(highres.colors(xx, yy), colorSky, 1.0, 0.2))
                         'if (xx = xborder0) or (xx = xborder1) or (yy = yborder0) or (yy = yborder1) then
@@ -1784,10 +1859,13 @@ sub fractalDrill(startX as double, startY as double, startZ as integer = 0, u as
         size = iif(rndint(0,1)=0, 1, 2)
         for yy = y-size to y+size
             for xx = x-size to x+size
-                highres.setHeight(xx, yy, highres.heights(x, y))
-                highres.setCeil(xx, yy, highres.ceils(x, y))
-                highres.setColor(xx, yy, highres.colors(x, y))
-                highres.setCeilColor(xx, yy, highres.ceilcolors(x, y))
+                cell = highres.getCell(xx, yy)
+                if cell <> 0 then
+                    cell->setFloorHeight( highres.getCell(x, y)->getFloorHeight() )
+                    cell->setCeilHeight( highres.getCell(x, y)->getCeilHeight() )
+                    cell->setFloorTile( highres.getCell(x, y)->getFloorTile() )
+                    cell->setCeilHeight( highres.getCell(x, y)->getCeilHeight() )
+                end if
             next xx
         next yy
         if rndint(0, 5) <> 0 then
@@ -1819,6 +1897,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     
     dim x as integer, y as integer
     dim v as Vector
+    dim cell as FlatMapCell ptr
     
     dim objects(16, 1) as string
     dim i as integer
@@ -1846,21 +1925,21 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     r2 = rnd(1)*360
     r3 = rnd(1)*360
     
-    for y = 0 to highres.h-1
-        for x = 0 to highres.w-1
-            if x > 150 and y > 150 and x < highres.w-150 and y < highres.h-150 then
-                highres.setCeil(x, y, 5000-(abs(sin(x*TO_RAD)-cos(y*TO_RAD))*500))
+    for y = 0 to highres.getHeight()-1
+        for x = 0 to highres.getWidth()-1
+            cell = highres.getCell(x, y)
+            if x > 150 and y > 150 and x < highres.getWidth()-150 and y < highres.getHeight()-150 then
+                cell->setCeilHeight( 5000-(abs(sin(x*TO_RAD)-cos(y*TO_RAD))*500) )
                 r = int(fractalSomething(x*x+y)*1) and 15'((x xor y) and 7)
-                highres.setCeilColor(x, y, rgb(&hee+r, &hee+r, &hee+r))
-                if highres.ceils(x, y) > 4700 then
-                    highres.setCeilColor(x, y, &hff00ff)
+                cell->setCeilTile( addTileColor(rgb(&hee+r, &hee+r, &hee+r)) )
+                if cell->getCeilHeight() > 4700 then
+                    cell->setCeilTile( addTileColor(&hff00ff))
                 else
-                    highres.setCeil(x, y, highres.ceils(x, y)-50)
-                    highres.setData(x, y, 1, Datas.clouds)
+                    cell->setCeilHeight( cell->getCeilHeight()-50 )
+                    cell->setFlag( CellFlags.clouds )
                 end if
                 
-                highres.setWall(x, y, 0)
-                highres.setHeight(x, y, _
+                cell->setFloorHeight(_
                   ((abs(sin(x*3*TO_RAD)*cos(y*3*TO_RAD))+sin(x*3*TO_RAD))*-h _
                 - (abs(sin(y*TO_RAD)))*-h _
                 + (abs(cos(y/10*TO_RAD)))*-h) _
@@ -1874,33 +1953,31 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
                 '  + fractalSomething3(Vector(x,y)) _ '*-h _
                 ')
                 
-                if highres.heights(x, y) < -int(h*0.95) then
-                    highres.setHeight(x, y, -int(h*0.95))
+                if cell->getFloorHeight() < -int(h*0.95) then
+                    cell->setFloorHeight( -int(h*0.95) )
                     'highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
                     'highres.setColor(x, y, &h5c73ab)
                     r = int(16*rnd(1))-32
-                    highres.setColor(x, y, rgbAdd(colorWater, r))
-                    highres.setData(x, y, 0, Datas.water)
+                    cell->setFloorTile( addTileColor(rgbAdd(colorWater, r)) )
+                    cell->setFlag( CellFlags.water )
                 else
                     r = int(16*rnd(1))-32
-                    highres.setColor(x, y, rgbAdd(colorFloor, r))
+                    cell->setFloorTile( addTileColor(rgbAdd(colorFloor, r)) )
                 end if
             
             else
-                highres.setCeil(x, y, 0)
-                highres.setHeight(x, y, 0)
+                cell->setCeilHeight( 0 )
+                cell->setFloorHeight( 0 )
                 r = int(16*rnd(1))-32
-                highres.setCeilColor(x, y, rgbAdd(colorWall, r))
-                highres.setColor(x, y, rgbAdd(colorWall, r))
-                highres.setCeilColor(x, y, rgbMix(highres.colors(x, y), &h000000, 1.0, (150-x)*(150-x)*0.01))
-                highres.setColor(x, y, rgbMix(highres.colors(x, y), &h000000, 1.0, (150-x)*(150-x)*0.01))
+                cell->setCeilTile( addTileColor( rgbMix(rgbAdd(colorWall, r), &h000000, 1.0, (150-x)*(150-x)*0.01)) )
+                cell->setFloorTile( addTileColor( rgbMix(rgbAdd(colorWall, r), &h000000, 1.0, (150-x)*(150-x)*0.01)) )
             end if
         next x
         if (y and 511) = 0 then print ".";
     next y
     for i = 0 to 30
         y = 1024*rnd(1)
-        fractalDrill(150, y, highres.heights(151, y)+100*rnd(1), Vector(-10, 0, 0), 30)
+        fractalDrill(150, y, highres.getCell(151, y)->getFloorHeight()+100*rnd(1), Vector(-10, 0, 0), 30)
     next i
     dim dx as integer
     dim dy as integer
@@ -1921,12 +1998,13 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
         end if
         for y = dy-3 to dy+3
             for x = dx-3 to dx+3
+                cell = highres.getCell(x, y)
                 dist = sqr((x-dx)*(x-dx)+(y-dy)*(y-dy)) 'iif(abs(x-dx) > abs(y-dy), abs(x-dx), abs(y-dy))+1
                 if dist <= 3 then
                     dist *= 3
                     if dist < 0.8 then dist = 0.8
-                    highres.setColor(x, y, rgbMix(highres.colors(x, y), lightColor, dist, 1.0))
-                    highres.setCeilColor(x, y, rgbMix(highres.colors(x, y), lightColor, dist, 1.0))
+                    cell->setFloorTile( addTileColor( rgbMix(tileColors(cell->getFloorTile()), lightColor, dist, 1.0)) )
+                    cell->setCeilTile( addTileColor( rgbMix(tileColors(cell->getFloorTile()), lightColor, dist, 1.0)) )
                 end if
             next x
         next y
@@ -2047,13 +2125,13 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     restore objects
     for i = 0 to 0
         obj_id = 1'int(2*rnd(1))
-        x = int(highres.w*rnd(1))
-        y = int(highres.h*rnd(1))
+        x = int(highres.getWidth()*rnd(1))
+        y = int(highres.getHeight()*rnd(1))
         low_h = 9999
         for dy = 0 to 15
             for dx = 0 to 15
                 if dx = 0 or dy = 0 or dx = 15 or dy = 15 then
-                    h = highres.heights(x+dx, y+dy)
+                    h = highres.getCell(x+dx, y+dy)->getFloorHeight()
                     if h < low_h then
                         low_h = h
                     end if
@@ -2062,6 +2140,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
         next dy
         for dy = 0 to 15
             for dx = 0 to 15
+                cell = highres.getCell(x+dx, y+dy)
                 c = mid(objects(dy, obj_id), dx+1, 1)
                 if c = "#" then
                     h = 2
@@ -2078,19 +2157,19 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
                     r = h*12+20
                 end if
                 h *= iif(obj_id = 0, 40, 150)
-                highres.setHeight(x+dx, y+dy, low_h+h)
+                cell->setFloorHeight( low_h+h )
                 dim nothing as integer = int(16*rnd(1))-32
                 if h = -40 then
-                    highres.setColor(x+dx, y+dy, rgb(&h6e, &h72, &h9f))
+                    cell->setFloorTile( addTileColor(rgb(&h6e, &h72, &h9f)) )
                 elseif h <> 0 then
-                    highres.setColor(x+dx, y+dy, rgb(&hff+r, &he4+r, &hd8+r))
+                    cell->setFloorTile( addTileColor(rgb(&hff+r, &he4+r, &hd8+r)) )
                 else
                     if (y+dy) and 1 then
                         r = iif((x+dx) and 1, &hbe, &h22)
                     else
                         r = iif((x+dx) and 1, &h22, &hbe)
                     end if
-                    highres.setColor(x+dx, y+dy, rgb(&h00+r, &h00+r, &h00+r))
+                    cell->setFloorTile( addTileColor(rgb(&h00+r, &h00+r, &h00+r)) )
                 end if
             next dx
         next dy
@@ -2099,110 +2178,90 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     print ".";
     
     '// glow boxes
-    dim rx as integer, ry as integer
-    for i = 0 to 0
-        rx = int(highres.w*rnd(1))
-        ry = int(highres.h*rnd(1))
-        low_h = 9999
-        for y = ry-10 to ry+10
-            for x = rx-10 to rx+10
-                if highres.heights(x, y) < low_h then
-                    low_h = highres.heights(x, y)
-                end if
-            next x
-        next y
-        for y = ry-10 to ry+10
-            for x = rx-10 to rx+10
-                dist = iif(abs(x-rx) > abs(y-ry), abs(x-rx), abs(y-ry))+1
-                dist = 1000/(dist*dist)
-                colr = highres.colors(x, y)
-                r = red(colr): g = grn(colr): b = blu(colr)
-                r = iif(r+dist > 255, 255, r+dist)
-                g = iif(g+dist > 255, 255, g+dist)
-                b = iif(b+dist > 255, 255, b+dist)
-                highres.setColor(x, y, rgb(r, g, b))
-                'highres.setHeight(x, y, low_h)
-            next x
-        next y
-        highres.setHeight(rx, ry, highres.heights(rx, ry)+25000)
-    next i
-    
-    print ".";
-    
+    'dim rx as integer, ry as integer
+    'for i = 0 to 0
+    '    rx = int(highres.w*rnd(1))
+    '    ry = int(highres.h*rnd(1))
+    '    low_h = 9999
+    '    for y = ry-10 to ry+10
+    '        for x = rx-10 to rx+10
+    '            if highres.heights(x, y) < low_h then
+    '                low_h = highres.heights(x, y)
+    '            end if
+    '        next x
+    '    next y
+    '    for y = ry-10 to ry+10
+    '        for x = rx-10 to rx+10
+    '            dist = iif(abs(x-rx) > abs(y-ry), abs(x-rx), abs(y-ry))+1
+    '            dist = 1000/(dist*dist)
+    '            colr = highres.colors(x, y)
+    '            r = red(colr): g = grn(colr): b = blu(colr)
+    '            r = iif(r+dist > 255, 255, r+dist)
+    '            g = iif(g+dist > 255, 255, g+dist)
+    '            b = iif(b+dist > 255, 255, b+dist)
+    '            highres.setColor(x, y, rgb(r, g, b))
+    '            'highres.setHeight(x, y, low_h)
+    '        next x
+    '    next y
+    '    highres.setHeight(rx, ry, highres.heights(rx, ry)+25000)
+    'next i
+    '
+    'print ".";
+    '
     '// portals
-    dim dat as integer
-    dim xFrom as integer, yFrom as integer
-    dim xTo as integer, yTo as integer
-    for i = 0 to 9
-        do
-            xFrom = int(highres.w*rnd(1)): yFrom = int(highres.h*rnd(1))
-            xTo = int(highres.w*rnd(1)): yTo = int(highres.h*rnd(1))
-        loop while (xFrom = xTo) and (yFrom = yTo)
-        highres.setData(x, y, 0, (xFrom shl 16) or yFrom)
-        highres.setData(x, y, 1, (xTo shl 16) or yTo)
-        highres.setCallback(x, y, @rayTeleport)
-    next i
-    
-    print ".";
-    
+    'dim dat as integer
+    'dim xFrom as integer, yFrom as integer
+    'dim xTo as integer, yTo as integer
+    'for i = 0 to 9
+    '    do
+    '        xFrom = int(highres.w*rnd(1)): yFrom = int(highres.h*rnd(1))
+    '        xTo = int(highres.w*rnd(1)): yTo = int(highres.h*rnd(1))
+    '    loop while (xFrom = xTo) and (yFrom = yTo)
+    '    highres.setData(x, y, 0, (xFrom shl 16) or yFrom)
+    '    highres.setData(x, y, 1, (xTo shl 16) or yTo)
+    '    highres.setCallback(x, y, @rayTeleport)
+    'next i
+    '
+    'print ".";
+    '
     '// normals
     dim vNorth as Vector = vectorUnit(Vector(1, -1, 1))
     dim vNormal as Vector
     dim w as Vector
     dim u as Vector
     dim hh as double
-    for y = 0 to highres.h-1
-        for x = 0 to highres.w-1
-            if (x > 150) and (x < highres.w-150) and (y > 150) and (y < highres.h-150) then
-                u.x = x: u.y = y: u.z = highres.heights(x, y)
-                v.x = -10: v.y = y-10: v.z = highres.heights(x+10, y+10)
+    for y = 0 to highres.getHeight()-1
+        for x = 0 to highres.getWidth()-1
+            cell = highres.getCell(x, y)
+            if (x > 150) and (x < highres.getWidth()-150) and (y > 150) and (y < highres.getHeight()-150) then
+                u.x = x: u.y = y: u.z = cell->getFloorHeight()
+                v.x = -10: v.y = y-10: v.z = highres.getCell(x+10, y+10)->getFloorHeight()
                 w = vectorUnit(vectorCross(vectorUnit(u), vectorUnit(v)))
                 vNormal = w
-                highres.setNormal(x, y, int(vectorDot(vNormal, vNorth)*40))
+                cell->setNormal( int(vectorDot(vNormal, vNorth)*40) )
             end if
         next x
     next y
     
     '// generate low-res maps
-    for y = 0 to medres.h-1
-        for x = 0 to medres.w-1
-            medres.setWall(x, y, highres.getWallAvg(x*2, y*2, 2))
-            medres.setHeight(x, y, highres.getHeightAvg(x*2, y*2, 2))
-            medres.setCeil(x, y, highres.getCeilAvg(x*2, y*2, 2))
-            medres.setColor(x, y, highres.getColorAvg(x*2, y*2, 2))
-            medres.setCeilColor(x, y, highres.getCeilColorAvg(x*2, y*2, 2))
-            medres.setCallback(x, y, highres.getCallbackAvg(x*2, y*2, 2))
-            medres.setData(x, y, 0, highres.getDataAvg(x*2, y*2, 0, 2))
-            medres.setData(x, y, 1, highres.getDataAvg(x*2, y*2, 1, 2))
-            medres.setNormal(x, y, highres.getNormalAvg(x*2, y*2, 2))
+    for y = 0 to medres.getHeight()-1
+        for x = 0 to medres.getWidth()-1
+            cell = medres.getCell(x, y)
+            *cell = highres.getCellAvg(x*2, y*2, 2)
         next x
     next y
     print ".";
-    for y = 0 to lowres.h-1
-        for x = 0 to lowres.w-1
-            lowres.setWall(x, y, highres.getWallAvg(x*4, y*4, 4))
-            lowres.setHeight(x, y, highres.getHeightAvg(x*4, y*4, 4))
-            lowres.setCeil(x, y, highres.getCeilAvg(x*4, y*4, 4))
-            lowres.setColor(x, y, highres.getColorAvg(x*4, y*4, 4))
-            lowres.setCeilColor(x, y, highres.getCeilColorAvg(x*4, y*4, 4))
-            lowres.setCallback(x, y, highres.getCallbackAvg(x*4, y*4, 4))
-            lowres.setData(x, y, 0, highres.getDataAvg(x*4, y*4, 0, 4))
-            lowres.setData(x, y, 1, highres.getDataAvg(x*4, y*4, 1, 4))
-            lowres.setNormal(x, y, highres.getNormalAvg(x*4, y*4, 4))
+    for y = 0 to lowres.getHeight()-1
+        for x = 0 to lowres.getWidth()-1
+            cell = lowres.getCell(x, y)
+            *cell = highres.getCellAvg(x*4, y*4, 4)
         next x
     next y
     print ".";
-    for y = 0 to subres.h-1
-        for x = 0 to subres.w-1
-            subres.setWall(x, y, highres.getWallAvg(x*8, y*8, 8))
-            subres.setHeight(x, y, highres.getHeightAvg(x*8, y*8, 8))
-            subres.setCeil(x, y, highres.getCeilAvg(x*8, y*8, 8))
-            subres.setColor(x, y, highres.getColorAvg(x*8, y*8, 8))
-            subres.setCeilColor(x, y, highres.getCeilColorAvg(x*8, y*8, 8))
-            subres.setCallback(x, y, highres.getCallbackAvg(x*8, y*8, 8))
-            subres.setData(x, y, 0, highres.getDataAvg(x*8, y*8, 0, 8))
-            subres.setData(x, y, 1, highres.getDataAvg(x*8, y*8, 1, 8))
-            subres.setNormal(x, y, highres.getNormalAvg(x*8, y*8, 8))
+    for y = 0 to subres.getHeight()-1
+        for x = 0 to subres.getWidth()-1
+            cell = subres.getCell(x, y)
+            *cell = highres.getCellAvg(x*8, y*8, 8)
         next x
     next y
     print "ready!"
@@ -2277,42 +2336,90 @@ data "................"
 data "................"
 data "................"
 
-symbols:
-data "..###..........."
-data "..#..#.#.##.##.."
-data "..#..#.#.#.#.#.."
-data "..#..#.#.#...#.."
-data "..###..#.#...#.."
+runes:
+data ".###...###..##.##"
+data ".#..#...#...#####"
+data ".#..#...#...#.#.#"
+data ".#..#...#...#...#"
+data ".###...###..#...#"
 
-data "..###......###.."
-data ".#....#..#.#..#."
-data ".###..#..#.###.."
-data "....#.#..#.#..#."
-data ".####.####.###.."
+data ".###..#...#.#####"
+data "..#...##..#...#.."
+data "..#...#.#.#...#.."
+data "..#...#..##...#.."
+data ".###..#...#...#.."
 
-data ".####.....###..."
-data ".#...####.#..#.."
-data ".###.#..#.###..."
-data ".#...#..#.#..#.."
-data ".#...####.#...#."
+data ".#...#...##.####.."
+data ".#...#..#.#.#..##."
+data ".#...#.#..#.####.."
+data "..#.#.#####.#..##."
+data "...#..#...#.#...##"
 
-data "................"
-data "....#######....."
-data "................"
-data "....#######....."
-data "................"
+data ".#####......####.."
+data ".##....###..#..##."
+data ".####.#...#.####.."
+data ".##...#...#.#..##."
+data ".##....###..#...##"
 
-data ".....##..##....."
-data "...##......##..."
-data ".##..........##."
-data "...##......##..."
-data ".....##..##....."
+data ".##.##.......###.."
+data ".#####..###..#..#."
+data ".#.#.#.#...#.#..#."
+data ".#...#.#...#.#..#."
+data ".#...#..###..###.."
 
-data ".....######....."
-data ".....#....#....."
-data ".........#......"
-data ".......#........"
-data ".......#........"
+data "...##.#...#..###.."
+data "..#.#.##..#..#..#."
+data ".#..#.#.#.#..#..#."
+data "#####.#..##..#..#."
+data "#...#.#...#..###.."
+
+data "#...#........#####"
+data "##..#...###....#.."
+data "#.#.#..#...#...#.."
+data "#..##..#...#...#.."
+data "#...#...###....#.."
+
+data ".#....####..#...#."
+data ".#....#.....##..#."
+data ".#....###...#.#.#."
+data ".#....#.....#..##."
+data ".####.####..#...#."
+
+data "..###..####..####."
+data ".#.....#..#.##...."
+data ".####..####.##...."
+data "....#..#....##...."
+data ".###...#.....####."
+
+'data ".####.......###."
+'data ".#....####.#...."
+'data ".#....#..#.###.."
+'data ".#....#..#....#."
+'data ".####.####.####."
+
+'data ".#..#.###.#...#."
+'data ".#..#.#....#.#.."
+'data ".####.###...#..."
+'data ".#..#.#....#.#.."
+'data ".#..#.###.#...#."
+
+'data "................"
+'data ".####.#..#.###.."
+'data ".#..#.#..#..#..."
+'data ".#..#.#..#..#..."
+'data ".####.####..#..."
+
+'data "..###......###.."
+'data ".#....#..#.#..#."
+'data ".###..#..#.###.."
+'data "....#.#..#.#..#."
+'data ".####.####.###.."
+
+'data "................"
+'data "##.##.####.###.."
+'data "#.#.#.#..#.#..#."
+'data "#...#.#..#.#..#."
+'data "#...#.####.###.."
 
 empty:
 data "................"
@@ -2331,6 +2438,24 @@ data "................"
 data "................"
 data "................"
 data "................"
+
+something:
+data "................"
+data "................"
+data "................"
+data "#######........."
+data "#..####........."
+data "#..####.#......."
+data "#######.###....."
+data "#######.#####..."
+data "....###.#######."
+data "....###.....####"
+data ".######.####.###"
+data ".......####.#.##"
+data "..##..###.#.####"
+data "....###...#####."
+data ".....#......####"
+data ".........######."
 
 zombie:
 data "......###......."

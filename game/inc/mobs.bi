@@ -1,0 +1,1 @@
+#include once "../mobs.bas"
