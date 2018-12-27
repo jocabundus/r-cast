@@ -18,17 +18,19 @@ private:
 	_y1 as integer
 	_z1 as integer
 	_render_callback as sub(d as Dart ptr)
-	_collide_callback as function(x as double, y as double, z as double) as integer
+	_collide_callback as function(d as Dart ptr, extra as any ptr) as integer
 	_current as Dart ptr = 0
+	_count as integer
 public:
 	
 	declare constructor()
 	declare function setBounds(x0 as integer, y0 as integer, z0 as integer, x1 as integer, y1 as integer, z1 as integer) as DartManager ptr
 	declare function setRenderCallback(p as sub(d as Dart ptr)) as DartManager ptr
-	declare function setDefaultCollideCallback(p as function(x as double, y as double, z as double) as integer) as DartManager ptr
+	declare function setDefaultCollideCallback(p as function(d as Dart ptr, extra as any ptr) as integer) as DartManager ptr
 	declare function fire(start as Vector, forward as Vector, speed as double, id as integer) as Dart ptr
 	declare function cycle(speed as double = 1) as DartManager ptr
 	declare function getCurrent() as Dart ptr
 	declare function clearDarts() as DartManager ptr
+	declare function getCount() as integer
 
 end type

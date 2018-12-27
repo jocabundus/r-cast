@@ -28,7 +28,7 @@ function vectorRight(u as Vector) as Vector
     dim v as Vector
     v.y = -u.x
     v.x =  u.y
-    v.z =  u.z
+    v.z =  0'u.z
     
     return v
 
@@ -106,18 +106,22 @@ function vectorRotateZ(u as Vector, a as double) as Vector
     return v
 end function
 
-function vectorMake2d(u as Vector, xScale as double, yScale as double, zxScale as double, zyScale as double) as Vector
-    dim halfx as double, halfy as double
-    dim zx as double, zy as double
+function vectorMake2d(u as Vector, screenX as integer, screenY as integer, scale as double=1.0) as Vector
+    dim halfx as integer, halfy as integer
     dim v as Vector
-    halfx = xScale*0.5
-    halfy = yScale*0.5
-    zx = (u.z * zxScale): if zx = 0 then return u
-    zy = (u.z * zyScale): if zy = 0 then return u
-    v.x = ( u.x*xScale) / zx + halfx
-    v.y = (-u.y*xScale) / zy + halfy
+    halfx = screenX shr 1
+    halfy = screenY shr 1
+    if u.z = 0 then u.z = 0.0001
+    v.x = ( u.x*scale ) / u.z + halfx
+    v.y = ( u.y*scale ) / u.z + halfy
     v.z = 0
     return v
+end function
+
+function vectorFacesPoint(u as Vector, p as Vector) as boolean
+
+    return iif(vectorDot(u, vectorUnit(p)) > 0, true, false)
+
 end function
 
 operator + (byref u as Vector, byref v as Vector) as Vector

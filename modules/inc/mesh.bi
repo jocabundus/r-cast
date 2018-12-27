@@ -9,7 +9,7 @@ type Vector3
     declare function rotateX(a as double) as Vector3 ptr
     declare function rotateY(a as double) as Vector3 ptr
     declare function rotateZ(a as double) as Vector3 ptr
-    declare function make2d(xScale as double, yScale as double, zxScale as double = 1.0, zyScale as double = 1.0) as Vector3 ptr
+    declare function make2d(screenX as integer, screenY as integer, scale as double=1.0) as Vector3 ptr
 end type
 
 type MeshPoly

@@ -66,9 +66,12 @@ function DartManager.fire(start as Vector, forward as Vector, speed as double, f
     d->setVy(vy)
     d->setVz(vz)
     d->setSpeed(speed)
-    d->setX(start.x+vx*0.5)
-    d->setY(start.y+vy*0.5)
-    d->setZ(start.z+vz*0.5)
+    d->setX(start.x)
+    d->setY(start.y)
+    d->setZ(start.z)
+    d->setAngleX(0)
+    d->setAngleY(0)
+    d->setAngleZ(0)
     d->setCount(0)
     d->setExpires(0)
     d->setExpiresInSeconds(0)
@@ -92,6 +95,10 @@ function DartManager.fire(start as Vector, forward as Vector, speed as double, f
     
 end function
 
+'// when precision and collision doesn't matter (like for particles)
+'//function DartManager.fireFastDart(start as Vector, forward as Vector, speed as double, frame_start as integer) as Dart ptr
+'//end function
+
 function DartManager.cycle(speed as double = 1) as DartManager ptr
 
     dim n as integer, i as integer
@@ -106,6 +113,8 @@ function DartManager.cycle(speed as double = 1) as DartManager ptr
     
     dim tocall(256) as Dart
     dim numtocall as integer = 0
+    
+    this._count = 0
     
     i = this._firstidx
     prev = this._firstidx
@@ -135,12 +144,17 @@ function DartManager.cycle(speed as double = 1) as DartManager ptr
 		end if
 	    end if
 	    
-	    x = d->getX(): y = d->getY(): z = d->getZ()
-	    
-	    if (x < this._x0 or y < this._y0 or z < this._z0) or (x > this._x1 or y > this._y1 or z > this._z1) then
-		deleteDart = 1
+	    if d->checkBounds() then
+		x = d->getX(): y = d->getY(): z = d->getZ()
+		if (x < this._x0 or y < this._y0 or z < this._z0) or (x > this._x1 or y > this._y1 or z > this._z1) then
+		    deleteDart = 1
+		else
+		    if d->collide(@this) then
+			deleteDart = 1
+		    end if
+		end if
 	    else
-		if d->collide() then
+		if d->collide(@this) then
 		    deleteDart = 1
 		end if
 	    end if
@@ -174,10 +188,12 @@ function DartManager.cycle(speed as double = 1) as DartManager ptr
 		prev = i
 		i = this._nextidx(i)
 	    else
-		d->render()
+	    	d->render()
 	    end if
 		
 	loop while clipped
+	
+	this._count += 1
         
     wend
     
@@ -196,7 +212,7 @@ function DartManager.getCurrent() as Dart ptr
     return this._current
 end function
 
-function DartManager.setDefaultCollideCallback(p as function(x as double, y as double, z as double) as integer) as DartManager ptr
+function DartManager.setDefaultCollideCallback(p as function(d as Dart ptr, extra as any ptr) as integer) as DartManager ptr
     this._collide_callback = p
     return @this
 end function
@@ -209,4 +225,8 @@ function DartManager.clearDarts() as DartManager ptr
     this._lastidx = -1
     this._firstidx = -1
     return @this
+end function
+
+function DartManager.getCount() as integer
+    return this._count
 end function

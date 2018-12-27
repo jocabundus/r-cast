@@ -21,7 +21,8 @@ declare function vectorTranslate(u as Vector, x as double, y as double, z as dou
 declare function vectorRotateX(u as Vector, a as double) as Vector
 declare function vectorRotateY(u as Vector, a as double) as Vector
 declare function vectorRotateZ(u as Vector, a as double) as Vector
-declare function vectorMake2d(u as Vector, xScale as double, yScale as double, zxScale as double, zyScale as double) as Vector
+declare function vectorMake2d(u as Vector, screenX as integer, screenY as integer, scale as double=1.0) as Vector
+declare function vectorFacesPoint(u as Vector, p as Vector) as boolean
 declare operator + (byref u as Vector, byref v as Vector) as Vector
 declare operator - (byref u as Vector, byref v as Vector) as Vector
 declare operator * (byref u as Vector, byref v as Vector) as Vector

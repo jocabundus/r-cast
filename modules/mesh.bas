@@ -28,13 +28,16 @@ function Mesh.sort() as Mesh ptr
     dim z1 as double
     for i = 0 to this._polyCount-1
         for n = i+1 to this._polyCount-1
-            z0 = iif(this._polys(i).v(0)->z > this._polys(i).v(1)->z,_
-                 iif(this._polys(i).v(0)->z > this._polys(i).v(2)->z, this._polys(i).v(0)->z, this._polys(i).v(2)->z),_
-                 iif(this._polys(i).v(1)->z > this._polys(i).v(2)->z, this._polys(i).v(1)->z, this._polys(i).v(2)->z))
-            z1 = iif(this._polys(n).v(0)->z > this._polys(n).v(1)->z,_
-                 iif(this._polys(n).v(0)->z > this._polys(n).v(2)->z, this._polys(n).v(0)->z, this._polys(n).v(2)->z),_
-                 iif(this._polys(n).v(1)->z > this._polys(n).v(2)->z, this._polys(n).v(1)->z, this._polys(n).v(2)->z))
-            if z0 > z1 then
+            z0 = (this._polys(i).v(0)->z+this._polys(i).v(1)->z+this._polys(i).v(2)->z)/3
+            z1 = (this._polys(n).v(0)->z+this._polys(n).v(1)->z+this._polys(n).v(2)->z)/3
+            'z0 = iif(this._polys(i).v(0)->z > this._polys(i).v(1)->z,_
+            '     iif(this._polys(i).v(0)->z > this._polys(i).v(2)->z, this._polys(i).v(0)->z, this._polys(i).v(2)->z),_
+            '     iif(this._polys(i).v(1)->z > this._polys(i).v(2)->z, this._polys(i).v(1)->z, this._polys(i).v(2)->z))
+            'z1 = iif(this._polys(n).v(0)->z > this._polys(n).v(1)->z,_
+            '     iif(this._polys(n).v(0)->z > this._polys(n).v(2)->z, this._polys(n).v(0)->z, this._polys(n).v(2)->z),_
+            '     iif(this._polys(n).v(1)->z > this._polys(n).v(2)->z, this._polys(n).v(1)->z, this._polys(n).v(2)->z))
+            'if z0 > z1 then
+            if z0 < z1 then
                 swap this._polys(i), this._polys(n)
             end if
         next n
@@ -422,101 +425,48 @@ function Vector3.translate(x as double, y as double, z as double) as Vector3 ptr
     return @this
 end function
 function Vector3.rotateX(a as double) as Vector3 ptr
-    dim va as Vector
-    dim y as double
-    dim z as double
-    va = vectorFromAngle(a)
-    if a <> 0 then
-        y = this.v(0).y*va.x + this.v(0).z*-va.y
-        z = this.v(0).y*va.y + this.v(0).z*va.x
-        this.v(0).y = y
-        this.v(0).z = z
-        y = this.v(1).y*va.x + this.v(1).z*-va.y
-        z = this.v(1).y*va.y + this.v(1).z*va.x
-        this.v(1).y = y
-        this.v(1).z = z
-        y = this.v(2).y*va.x + this.v(2).z*-va.y
-        z = this.v(2).y*va.y + this.v(2).z*va.x
-        this.v(2).y = y
-        this.v(2).z = z
-        y = this.v(3).y*va.x + this.v(3).z*-va.y
-        z = this.v(3).y*va.y + this.v(3).z*va.x
-        this.v(3).y = y
-        this.v(3).z = z
+     if a <> 0 then
+        this.v(0) = vectorRotateX(this.v(0), a)
+        this.v(1) = vectorRotateX(this.v(1), a)
+        this.v(2) = vectorRotateX(this.v(2), a)
+        this.v(3) = vectorRotateX(this.v(3), a)
     end if
     return @this
 end function
 function Vector3.rotateY(a as double) as Vector3 ptr
-    dim va as Vector
-    dim x as double
-    dim z as double
-    va = vectorFromAngle(a)
     if a <> 0 then
-        x = this.v(0).x*va.x + this.v(0).z*-va.y
-        z = this.v(0).x*va.y + this.v(0).z*va.x
-        this.v(0).x = x
-        this.v(0).z = z
-        x = this.v(1).x*va.x + this.v(1).z*-va.y
-        z = this.v(1).x*va.y + this.v(1).z*va.x
-        this.v(1).x = x
-        this.v(1).z = z
-        x = this.v(2).x*va.x + this.v(2).z*-va.y
-        z = this.v(2).x*va.y + this.v(2).z*va.x
-        this.v(2).x = x
-        this.v(2).z = z
-        x = this.v(3).x*va.x + this.v(3).z*-va.y
-        z = this.v(3).x*va.y + this.v(3).z*va.x
-        this.v(3).x = x
-        this.v(3).z = z
+        this.v(0) = vectorRotateY(this.v(0), a)
+        this.v(1) = vectorRotateY(this.v(1), a)
+        this.v(2) = vectorRotateY(this.v(2), a)
+        this.v(3) = vectorRotateY(this.v(3), a)
     end if
     return @this
 end function
 function Vector3.rotateZ(a as double) as Vector3 ptr
-    dim va as Vector
-    dim x as double
-    dim y as double
-    va = vectorFromAngle(a)
     if a <> 0 then
-        x = this.v(0).x*va.x + this.v(0).y*-va.y
-        y = this.v(0).x*va.y + this.v(0).y*va.x
-        this.v(0).x = x
-        this.v(0).y = y
-        x = this.v(1).x*va.x + this.v(1).y*-va.y
-        y = this.v(1).x*va.y + this.v(1).y*va.x
-        this.v(1).x = x
-        this.v(1).y = y
-        x = this.v(2).x*va.x + this.v(2).y*-va.y
-        y = this.v(2).x*va.y + this.v(2).y*va.x
-        this.v(2).x = x
-        this.v(2).y = y
-        x = this.v(3).x*va.x + this.v(3).y*-va.y
-        y = this.v(3).x*va.y + this.v(3).y*va.x
-        this.v(3).x = x
-        this.v(3).y = y
+        this.v(0) = vectorRotateZ(this.v(0), a)
+        this.v(1) = vectorRotateZ(this.v(1), a)
+        this.v(2) = vectorRotateZ(this.v(2), a)
+        this.v(3) = vectorRotateZ(this.v(3), a)
     end if
     return @this
 end function
-function Vector3.make2d(xScale as double, yScale as double, zxScale as double = 1.0, zyScale as double = 1.0) as Vector3 ptr
+function Vector3.make2d(screenX as integer, screenY as integer, scale as double=1.0) as Vector3 ptr
     dim v3 as Vector3
-    dim halfx as double, halfy as double
-    dim zx0 as double, zx1 as double, zx2 as double
-    dim zy0 as double, zy1 as double, zy2 as double
-    halfx = xScale*0.5
-    halfy = yScale*0.5
-    zx0 = (this.v(0).z * zxScale): if zx0 = 0 then return @this' zx0 = 0.00000001
-    zx1 = (this.v(1).z * zxScale): if zx1 = 0 then return @this' zx1 = 0.00000001
-    zx2 = (this.v(2).z * zxScale): if zx2 = 0 then return @this' zx2 = 0.00000001
-    zy0 = (this.v(0).z * zyScale): if zy0 = 0 then return @this' zy0 = 0.00000001
-    zy1 = (this.v(1).z * zyScale): if zy1 = 0 then return @this' zy1 = 0.00000001
-    zy2 = (this.v(2).z * zyScale): if zy2 = 0 then return @this' zy2 = 0.00000001
-    this.v(0).x = ( this.v(0).x*xScale) / zx0 + halfx
-    this.v(0).y = (-this.v(0).y*xScale) / zy0 + halfy
+    dim halfx as integer, halfy as integer
+    halfx = screenX shr 1
+    halfy = screenY shr 1
+    if this.v(0).z <= 0.0001 then this.v(0).z = 0.0001
+    if this.v(1).z <= 0.0001 then this.v(1).z = 0.0001
+    if this.v(2).z <= 0.0001 then this.v(2).z = 0.0001
+    this.v(0).x = ( this.v(0).x*scale ) / this.v(0).z + halfx
+    this.v(0).y = (-this.v(0).y*scale ) / this.v(0).z + halfy
     this.v(0).z = 0
-    this.v(1).x = ( this.v(1).x*xScale) / zx1 + halfx
-    this.v(1).y = (-this.v(1).y*xScale) / zy1 + halfy
+    this.v(1).x = ( this.v(1).x*scale ) / this.v(1).z + halfx
+    this.v(1).y = (-this.v(1).y*scale ) / this.v(1).z + halfy
     this.v(1).z = 0
-    this.v(2).x = ( this.v(2).x*xScale) / zx2 + halfx
-    this.v(2).y = (-this.v(2).y*xScale) / zy2 + halfy
+    this.v(2).x = ( this.v(2).x*scale ) / this.v(2).z + halfx
+    this.v(2).y = (-this.v(2).y*scale ) / this.v(2).z + halfy
     this.v(2).z = 0
     return @this
 end function

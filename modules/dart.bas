@@ -127,11 +127,25 @@ function Dart.setStartXYZ(x as double, y as double, z as double) as Dart ptr
 	this._startZ = z
 	return @this
 end function
-function Dart.getAngle() as double
-	return this._ang
+function Dart.getAngleX() as double
+	return this._angleX
 end function
-function Dart.setAngle(ang as double) as Dart ptr
-	this._ang = ang
+function Dart.getAngleY() as double
+	return this._angleY
+end function
+function Dart.getAngleZ() as double
+	return this._angleZ
+end function
+function Dart.setAngleX(ang as double) as Dart ptr
+	this._angleX = ang
+	return @this
+end function
+function Dart.setAngleY(ang as double) as Dart ptr
+	this._angleY = ang
+	return @this
+end function
+function Dart.setAngleZ(ang as double) as Dart ptr
+	this._angleZ = ang
 	return @this
 end function
 function Dart.hasClip() as integer
@@ -168,12 +182,50 @@ function Dart.move(t as double) as Dart ptr
 	if this._move_callback <> 0 then
 		this._move_callback(@this, t)
 	else
-		this.moveOrthogonal(t)
-		'this._x += this._vx*this._speed*t
-		'this._y += this._vy*this._speed*t
+		this.moveUnit(t)
 	end if
 	return @this
 end function
+sub Dart.moveSimple(t as double)
+
+	this._x += this._vx*this._speed*t
+	this._y += this._vy*this._speed*t
+	this._z += this._vz*this._speed*t
+
+end sub
+'// when precision doesn't matter
+'// move with minimal processing
+sub Dart.moveFast(t as double)
+
+	'this._ix += this._ivx*t
+	'this._iy += this._ivy*t
+	'this._iz += this._ivz*t
+
+end sub
+'// move dart in any direction one unit at a time
+'// some corners might be missed
+sub Dart.moveUnit(t as double)
+
+	'// assumed that vx/vy/vz is a unit vector
+
+	if this._clipVx = 0 then
+		this._clipVx = this._speed*t
+	end if
+	
+	if this._clipVx > 1 then
+		this._clipVx -= 1
+		this._x += this._vx
+		this._y += this._vy
+		this._z += this._vz
+	elseif this._clipVx <= 1 then
+		this._x += this._vx*this._clipVx
+		this._y += this._vy*this._clipVx
+		this._z += this._vz*this._clipVx
+		this._clipVx = 0
+	end if
+
+end sub
+'// move dart along one axis, don't skip any squares
 sub Dart.moveOrthogonal(t as double)
 	dim dx as double, dy as double, dz as double
 	dim x as double, y as double, z as double
@@ -228,12 +280,19 @@ sub Dart.moveOrthogonal(t as double)
 	this._y += dy
 	this._z += dz
 end sub
-function Dart.setCollideCallback(p as function(x as double, y as double, z as double) as integer) as Dart ptr
+'// move dart along any axes, don't miss any squares
+sub Dart.movePerfect(t as double)
+end sub
+function Dart.setCollideCallback(p as function(d as Dart ptr, extra as any ptr) as integer) as Dart ptr
 	this._collide_callback = p
 	return @this
 end function
-function Dart.collide() as integer
-	return this._collide_callback(this._x+0.5, this._y+0.5, this._z+0.5)
+function Dart.collide(extra as any ptr = 0) as integer
+	if this._collide_callback <> 0 then
+		return this._collide_callback(@this, extra)
+	else
+		return 0
+	end if
 end function
 function Dart.setBeforeDelete(p as sub(d as Dart ptr)) as Dart ptr
 	this._before_delete = p
@@ -322,11 +381,20 @@ function Dart.clearAllFlags() as Dart ptr
 	this._flags = 0
 	return @this
 end function
+function Dart.setCheckBounds(do_check as boolean) as Dart ptr
+	this._check_bounds = do_check
+	return @this
+end function
+function Dart.checkBounds() as boolean
+	return this._check_bounds
+end function
 function Dart.setRenderCallback(p as sub(d as Dart ptr)) as Dart ptr
     this._render_callback = p
     return @this
 end function
 function Dart.render() as Dart ptr
-	this._render_callback(@this)
+	if this._render_callback <> 0 then
+		this._render_callback(@this)
+	end if
 	return @this
 end function

@@ -19,7 +19,9 @@ private:
 	_startZ as double
 	_way as Vector
 	_position as Vector
-	_ang as double
+	_angleX as double
+	_angleY as double
+	_angleZ as double
 	_clipVx as double
 	_clipVy as double
 	_clipVz as double
@@ -29,7 +31,7 @@ private:
 	_speed as double
 	_count as double
 	_move_callback as sub(d as Dart ptr, t as double)
-	_collide_callback as function(x as double, y as double, z as double) as integer
+	_collide_callback as function(d as Dart ptr, extra as any ptr) as integer
 	_before_delete as sub(d as Dart ptr)
 	_expires as integer
 	_expires_in_seconds as double
@@ -39,6 +41,7 @@ private:
 	_frame_start as integer
 	_frame_speed as double
 	_flags as integer
+	_check_bounds as boolean
 	_render_callback as sub(d as Dart ptr)
 public:
 
@@ -76,8 +79,12 @@ public:
 	declare function getStartZ() as double
 	declare function setStartZ(z as double) as Dart ptr
 	declare function setStartXYZ(x as double, y as double, z as double) as Dart ptr
-	declare function getAngle() as double
-	declare function setAngle(ang as double) as Dart ptr
+	declare function getAngleX() as double
+	declare function setAngleX(ang as double) as Dart ptr
+	declare function getAngleY() as double
+	declare function setAngleY(ang as double) as Dart ptr
+	declare function getAngleZ() as double
+	declare function setAngleZ(ang as double) as Dart ptr
 	declare function hasClip() as integer
 	declare function clearClip() as Dart ptr
 	declare function getSpeed() as double
@@ -86,8 +93,8 @@ public:
 	declare function setCount(count as double) as Dart ptr
 	declare function setMoveCallback(p as sub(d as Dart ptr, t as double)) as Dart ptr
 	declare function move(t as double) as Dart ptr
-	declare function setCollideCallback(p as function(x as double, y as double, z as double) as integer) as Dart ptr
-	declare function collide() as integer
+	declare function setCollideCallback(p as function(d as Dart ptr, extra as any ptr) as integer) as Dart ptr
+	declare function collide(extra as any ptr = 0) as integer
 	declare function setBeforeDelete(p as sub(d as Dart ptr)) as Dart ptr
 	declare function callBeforeDelete() as Dart ptr
 	declare function getExpires() as integer
@@ -110,9 +117,15 @@ public:
 	declare function hasFlag(flag as integer) as integer
 	declare function clearFlag(flag as integer) as Dart ptr
 	declare function clearAllFlags() as Dart ptr
+	declare function setCheckBounds(do_check as boolean) as Dart ptr
+	declare function checkBounds() as boolean
 	declare function setRenderCallback(p as sub(d as Dart ptr)) as Dart ptr
 	declare function render() as Dart ptr
     
+    declare sub moveSimple(t as double)
+    declare sub moveFast(t as double)
+    declare sub moveUnit(t as double)
     declare sub moveOrthogonal(t as double)
+    declare sub movePerfect(t as double)
 
 end type

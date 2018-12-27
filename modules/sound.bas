@@ -186,7 +186,7 @@ sub SOUND_AddSound (id as string, filename as string, maxChannels as integer=4, 
 
 end sub
 
-sub SOUND_PlaySound (id as string)
+sub SOUND_PlaySound (id as string, volume as double=1.0)
 
 	if GLOBAL_SoundInitialized = 0 then return
 
@@ -207,6 +207,9 @@ sub SOUND_PlaySound (id as string)
 			next i
 			
 			if channelSlot >= 0 then
+                if volume < 0.0 then volume = 0.0
+                if volume > 1.0 then volume = 1.0
+                Mix_VolumeChunk(GLOBAL_Sounds(n).sfxId, MIX_MAX_VOLUME*volume)
 				cid = Mix_PlayChannel(-1, GLOBAL_Sounds(n).sfxId, GLOBAL_Sounds(n).loops)
 				if cid >= 0 then
 					GLOBAL_Sounds(n).channels(channelSlot) = cid
