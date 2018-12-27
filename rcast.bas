@@ -7,8 +7,6 @@ randomize timer
 #define SCREEN_Y   300'198'198'720'300'198'300'1080'198
 #define HALF_X     SCREEN_X \ 2
 #define HALF_Y     SCREEN_Y \ 2
-
-
 #define PREC         (2^14)
 #define PREC_SHIFT   14
 dim shared MAX_DISTANCE as integer = (1024 shl PREC_SHIFT) '300
@@ -148,8 +146,8 @@ colorWater = rgbMix(hue(ang+340, 0.8), colorSky, 1.0, 0.5)
 
 atmosphereFactor = 0.005 '0.015 '0.005
 
-SOUND_SetMusicVolume 1.0
-SOUND_SetSoundVolume 1.0
+SOUND_SetMusicVolume 0.0'1.0
+SOUND_SetSoundVolume 0.0'1.0
 
 SOUND_SetMusic "ogg/explore.ogg"
 SOUND_AddSound "huh", "sfx/huh.wav", , , 0.3333
@@ -161,6 +159,7 @@ SOUND_AddSound "shoot0", "sfx/shoot1.wav", , , 1.00
 SOUND_AddSound "shoot1", "sfx/shoot5.wav", , , 1.00
 'SOUND_AddSound "shoot2", "sfx/boom3.wav", , , 1.00
 SOUND_AddSound "shoot2", "sfx/shoot8.wav", , , 1.00
+SOUND_AddSound "boom", "sfx/boom1.wav", , , 1.00
 
 SOUND_PlayMusic
 
@@ -171,8 +170,8 @@ dim shared meshes(64) as Mesh
 dim shared meshPositions(64) as Vector
 dim i as integer
 for i = 0 to 8
-    meshPositions(i).x = 160+rnd(1)*704
-    meshPositions(i).y = 160+rnd(1)*704
+    meshPositions(i).x = 80+rnd(1)*700
+    meshPositions(i).y = 80+rnd(1)*700
     meshPositions(i).z = highres.getCell(int(meshPositions(i).x)+0.5, int(meshPositions(i).y)+0.5)->getFloorHeight()*0.01+0.75
     'highres.getCell(int(meshPositions(i).x), int(meshPositions(i).y), &hffff00)
 next i
@@ -201,7 +200,9 @@ end enum
 type Game_Session
     position as Vector
     forward as Vector
+    angleX as double
     angleY as double
+    angleZ as double
     midline as double
     height as double
 end type
@@ -210,42 +211,267 @@ dim shared Game as Game_Session
 dim shared pixels as integer ptr
 dim shared pitch as integer
 
+function getForwardVector() as Vector
+
+    dim v as Vector
+
+    v = Vector(1, 0, 0)
+    v = vectorRotateY(v,  Game.angleZ)
+    v = vectorRotateZ(v,  Game.angleY)
+    v = vectorRotateX(v,  Game.angleX)
+    Game.forward = vectorUnit(v)
+    
+    return v
+
+end function
+
+function getForwardFlatVector() as Vector
+
+    dim v as Vector
+
+    v = Vector(1, 0, 0)
+    v = vectorRotateZ(v,  Game.angleY)
+    Game.forward = vectorUnit(v)
+    
+    return v
+
+end function
+
+function getRightVector() as Vector
+
+    dim v as Vector
+
+    v = Vector(0, -1, 0)
+    v = vectorRotateY(v,  Game.angleZ)
+    v = vectorRotateZ(v,  Game.angleY)
+    v = vectorRotateX(v,  Game.angleX)
+    
+    return v
+
+end function
+
+function getUpVector() as Vector
+
+    dim v as Vector
+
+    v = Vector(0, 0, 1)
+    v = vectorRotateY(v,  Game.angleZ)
+    v = vectorRotateZ(v,  Game.angleY)
+    v = vectorRotateX(v,  Game.angleX)
+    
+    return v
+
+end function
+
 function rndint(from as integer, too as integer) as integer
     return int(((too-from)+1)*rnd(1))+from
+end function
+
+static shared dartRenderCount as integer = 0
+
+sub dart_move_shrapnel(d as Dart ptr, delta as double)
+
+    d->setAngleZ( d->getAngleZ() + delta*500 )
+    d->moveSimple(delta)
+
+end sub
+
+sub dart_move_simple(d as Dart ptr, delta as double)
+
+    d->moveSimple(delta)
+
+end sub
+
+function mapToProj(u as Vector) as Vector
+
+    dim v as Vector
+    
+    v.x = u.y
+    v.y = u.z
+    v.z = u.x
+    
+    return v
+
 end function
 
 sub dart_render(d as Dart ptr)
 
 '	DrawOnMap Game.sprites(d->getFrameStart()+int(d->getCount())), d->getX(), d->getY(), 0
-    dim v as Vector
+    dim u as Vector
+    dim v3 as Vector3
     dim hd as double
     dim dist as integer
+    dim dot as double
     
     'm.translate(py-512, -(ph-hh), 512-px)
     
-    v.x = Game.position.y-d->getY()
-    v.y = -(Game.position.z-d->getZ())
-    v.z = d->getX()-Game.position.x
+    u.x = Game.position.y-d->getY()
+    u.y = -(Game.position.z-d->getZ())
+    u.z = d->getX()-Game.position.x
     'hd = 0' Game.position.z' - d->getZ()
+    
+    v3.v(0).x = -0.25
+    v3.v(1).x =  0.0
+    v3.v(2).x =  0.25
+    v3.v(0).y =  0.0
+    v3.v(1).y =  0.0
+    v3.v(2).y =  0.0
+    v3.v(0).z = -1.0
+    v3.v(1).z =  0.0
+    v3.v(2).z = -1.0
+    
+    v3.rotateX(-d->getAngleZ())
+    v3.rotateY(d->getAngleY())
+    v3.rotateZ(d->getAngleX())
+    v3.translate(u.x, u.y, u.z)
+    
+    'dim pv as Vector = Vector(d->getX()-Game.position.x, 0, d->getY()-Game.position.y)
+    'dim fv as Vector = vectorUnit(Vector(Game.forward.x, 0, Game.forward.y))
+    'dot = vectorDot(fv, vectorUnit(pv)): if dot < 0 then return
     
     dim size as double
     
     'v = vectorTranslate(v, Game.position.y-512, -hd, 512-Game.position.x)
-    v = vectorRotateY(v, -Game.angleY)
-    if v.z < 1 then return
-    dist = int(v.x) and 255
-    size = SCREEN_Y/v.z
-    v = vectorMake2d(v, SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
-    v = vectorTranslate(v, 0, Game.midline-HALF_Y, 0)
+    v3.rotateY(-Game.angleY)
     
-    size *= 0.5
-    drawTriangle(v.x-size, v.y-size, v.x+size, v.y-size, v.x, v.y, dist, &hff0000, pixels, pitch)
+    dist = (int((u.z))\4) and 255
+    
+    v3.make2d(SCREEN_X, SCREEN_Y, SCREEN_Y)
+    v3.translate(0, Game.midline-HALF_Y, 0)
+    
+    'dim vx as double, vy as double
+    'vx = cos(d->getAngle()*TO_RAD)*size
+    'vy = sin(d->getAngle()*TO_RAD)*size
+    
+    'size *= 0.5
+    drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, dist, tileColors(d->getFrameStart()), pixels, pitch)
+    
+    dartRenderCount += 1
 
 end sub
 
-function dart_collide(x as double, y as double, z as double) as integer
+sub dart_renderRGB(d as Dart ptr)
 
-    if highres.getCell(x, y)->getFloorHeight()*0.01 > z+0.5 then
+'	DrawOnMap Game.sprites(d->getFrameStart()+int(d->getCount())), d->getX(), d->getY(), 0
+    dim u as Vector
+    dim v3 as Vector3
+    dim hd as double
+    dim dist as integer
+    dim dot as double
+    
+    'm.translate(py-512, -(ph-hh), 512-px)
+    
+    u.x = Game.position.y-d->getY()
+    u.y = -(Game.position.z-d->getZ())
+    u.z = d->getX()-Game.position.x
+    'hd = 0' Game.position.z' - d->getZ()
+    
+    v3.v(0).x = -0.25
+    v3.v(1).x =  0.0
+    v3.v(2).x =  0.25
+    v3.v(0).y =  0.0
+    v3.v(1).y =  0.0
+    v3.v(2).y =  0.0
+    v3.v(0).z = -1.0
+    v3.v(1).z =  0.0
+    v3.v(2).z = -1.0
+    
+    v3.rotateX(d->getAngleX())
+    v3.rotateZ(d->getAngleZ())
+    v3.rotateY(d->getAngleY())
+    v3.translate(u.x, u.y, u.z)
+    
+    'dim pv as Vector = Vector(d->getX()-Game.position.x, 0, d->getY()-Game.position.y)
+    'dim fv as Vector = vectorUnit(Vector(Game.forward.x, 0, Game.forward.y))
+    'dot = vectorDot(fv, vectorUnit(pv)): if dot < 0 then return
+    'if vectorFacesPoint(Game.forward, Vector(d->getX()-Game.position.x, 0, d->getY()-Game.position.y)) then return
+    
+    dim size as double
+    
+    'v = vectorTranslate(v, Game.position.y-512, -hd, 512-Game.position.x)
+    v3.rotateY(-Game.angleY)
+    v3.rotateX( Game.angleZ)
+    
+    dist = (int((u.z))\4) and 255
+    
+    v3.make2d(SCREEN_X, SCREEN_Y, SCREEN_Y)
+    'v3.translate(0, Game.midline-HALF_Y, 0)
+    
+    'dim vx as double, vy as double
+    'vx = cos(d->getAngle()*TO_RAD)*size
+    'vy = sin(d->getAngle()*TO_RAD)*size
+    
+    'size *= 0.5
+    drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, dist, d->getFrameStart(), pixels, pitch)
+    
+    dartRenderCount += 1
+
+end sub
+
+sub dart_renderRGB_static(d as Dart ptr)
+
+	dim u as Vector
+    dim v3 as Vector3
+    
+    u.x = d->getX()
+    u.y = d->getY()
+    u.z = d->getZ()
+    
+    v3.v(0).x = -0.25
+    v3.v(1).x =  0.0
+    v3.v(2).x =  0.25
+    v3.v(0).y =  0.0
+    v3.v(1).y =  0.0
+    v3.v(2).y =  0.0
+    v3.v(0).z = -1.0
+    v3.v(1).z =  0.0
+    v3.v(2).z = -1.0
+    
+    v3.rotateZ(d->getAngleZ())
+    v3.rotateX(-d->getAngleX())
+    v3.rotateY(d->getAngleY())
+    v3.translate(u.x, u.y, u.z)
+    
+    v3.make2d(SCREEN_X, SCREEN_Y, SCREEN_Y)
+    
+    drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, -1, d->getFrameStart(), pixels, pitch)
+    
+    dartRenderCount += 1
+
+end sub
+
+'// inaccurate, but close enough for some things
+function quick_dist(u as Vector, v as Vector) as double
+
+    return abs(u.x-v.x)+abs(u.y-v.y)+abs(u.z-v.z)
+
+end function
+
+function dart_collide(d as Dart ptr, extra as any ptr) as integer
+
+    dim top as double
+    dim cell as FlatMapCell ptr
+    dim darts as DartManager ptr
+    
+    cell = highres.getCell(d->getX(), d->getY())
+    top = cell->getFloorHeight()*0.01
+    
+    if d->getZ() <= top then
+        darts = cast(DartManager ptr, extra)
+        darts->fire(Vector(d->getX(), d->getY(), top), Vector(1-rnd(1)*2, 1-rnd(1)*2, rnd(1)), 25, cell->getFloorTile())_
+            ->setCollideCallback(0)_
+            ->setExpiresInSeconds(1.0)_
+            ->setMoveCallback( @dart_move_shrapnel )
+        darts->fire(Vector(d->getX(), d->getY(), top), Vector(1-rnd(1)*2, 1-rnd(1)*2, rnd(1)), 25, cell->getFloorTile())_
+            ->setCollideCallback(0)_
+            ->setExpiresInSeconds(1.0)_
+            ->setMoveCallback( @dart_move_shrapnel )
+        darts->fire(Vector(d->getX(), d->getY(), top), Vector(1-rnd(1)*2, 1-rnd(1)*2, rnd(1)), 25, cell->getFloorTile())_
+            ->setCollideCallback(0)_
+            ->setExpiresInSeconds(1.0)_
+            ->setMoveCallback( @dart_move_shrapnel )
+        SOUND_PlaySound "boom", 1-quick_dist(Vector(d->getX(), d->getY(), d->getZ()), Game.position)*0.005
+        cell->setFloorTile( addTileColor(rgbMix(tileColors(cell->getFloorTile()), &h000000, 1.0, 0.2)) )
         return 1
     else
         return 0
@@ -428,7 +654,7 @@ end sub
 
 sub main()
 
-    dim px as double, py as double
+    dim px as double, py as double, pz as double
     dim pa as double
     dim ph as double
     dim f as double
@@ -442,21 +668,52 @@ sub main()
     
     dim vf as Vector
     dim vr as Vector
-    dim vray as Vector
+    dim vu as Vector
+    dim vrayTop as Vector
+    dim vrayBtm as Vector
     
-    dim dx as uinteger, dy as uinteger
-    dim ax as integer, ay as integer
-    dim ex as integer, ey as integer
-    dim x_dx as uinteger, x_dy as uinteger
-    dim y_dx as uinteger, y_dy as uinteger
-    dim x_ax as integer, x_ay as integer
-    dim y_ax as integer, y_ay as integer
-    dim x_ex as uinteger, x_ey as uinteger
-    dim y_ex as uinteger, y_ey as uinteger
+    'dim topFovPosX as Vector
+    'dim btmFovPosX as Vector
+    'dim topFovPosY as Vector
+    'dim btmFovPosY as Vector
+    'dim topFovIncX as Vector
+    'dim btmFovIncX as Vector
+    'dim topFovIncY as Vector
+    'dim btmFovIncY as Vector
+    'dim topFovAdjX as Vector
+    'dim btmFovAdjX as Vector
+    'dim topFovAdjY as Vector
+    'dim btmFovAdjY as Vector
+    
+    dim x_tx as uinteger, x_ty as uinteger, x_tz as uinteger '// top FOV ray coordinates  -- X intersections
+    dim x_bx as uinteger, x_by as uinteger, x_bz as uinteger '// btm FOV ray coordinates  -- X intersections
+    dim y_tx as uinteger, y_ty as uinteger, y_tz as uinteger '// top FOV ray coordinates  -- Y intersections
+    dim y_bx as uinteger, y_by as uinteger, y_bz as uinteger '// btm FOV ray coordinates  -- Y intersections
+    dim x_atx as integer, x_aty as integer, x_atz as integer '// top FOV increment amount -- X intersections
+    dim x_abx as integer, x_aby as integer, x_abz as integer '// btm FOV increment amount -- X intersections
+    dim y_atx as integer, y_aty as integer, y_atz as integer '// top FOV increment amount -- Y intersections
+    dim y_abx as integer, y_aby as integer, y_abz as integer '// btm FOV increment amount -- Y intersections
+    dim x_etx as uinteger, x_ety as uinteger '// top FOV extra increment amount -- X intersections
+    dim x_ebx as uinteger, x_eby as uinteger '// btm FOV extra increment amount -- X intersections
+    dim y_etx as uinteger, y_ety as uinteger '// top FOV extra increment amount -- Y intersections
+    dim y_ebx as uinteger, y_eby as uinteger '// btm FOV extra increment amount -- Y intersections
+    
+    dim tx as uinteger, ty as uinteger, tz as uinteger '// temporary ray coordinate values for top FOV ray coordinates (used for closest X/Y intersection)
+    dim bx as uinteger, by as uinteger, bz as uinteger '// temporary ray coordinate values for btm FOV ray coordinates (used for closest X/Y intersection)
+    dim etx as integer, ety as integer                 '// temporary ray increment  values for top FOV ray coordinates (used for closest X/Y intersection)
+    dim ebx as integer, eby as integer                 '// temporary ray increment  values for top FOV ray coordinates (used for closest X/Y intersection)
+    
+    dim ftx as double, fty as double, ftz as double
+    dim fbx as double, fby as double, fbz as double
+    dim fdist as double
+    
     dim lx as uinteger, ly as uinteger
-    dim xHit as integer, yHit as integer
-    dim xDist as uinteger, yDist as uinteger
-    dim dist as integer
+    dim tmx as uinteger, tmy as uinteger
+    dim bmx as uinteger, bmy as uinteger
+    dim xtDist as uinteger, ytDist as uinteger
+    dim xbDist as uinteger, ybDist as uinteger
+    dim tDist as uinteger, bDist as uinteger
+    dim dist as uinteger
     dim dc as double
     dim sliceSize as double
     
@@ -486,8 +743,10 @@ sub main()
     dim delta as double
     
     dim darts as DartManager
-    darts.setBounds(0, 0, 0, highres.getWidth(), highres.getHeight(), 10000)
+    darts.setBounds(0, 0, -50, highres.getWidth(), highres.getHeight(), 50)
     darts.setRenderCallback(@dart_render)
+    
+    dim centerDist as double
     
     dim mobs as MobManager
     
@@ -509,8 +768,6 @@ sub main()
     dim texture as SDL_Texture ptr
     texture = SDL_CreateTexture(gfxRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SCREEN_X, SCREEN_Y)
     
-    dim down as Vector
-    
     'loadHorse()
     loadMeshFile "shopvac.dae", 0
     loadRunes 1
@@ -522,25 +779,28 @@ sub main()
     pa = 0
     midline = HALF_Y
     my = 0
+    dim rotateZ as double
     do
         px = Game.position.x
         py = Game.position.y
         ph = Game.position.z
+        pz = Game.position.z
         height = Game.height
     
-        if px <= 140 then
-            atmosphereFactor = 0.005+(150-px)*0.002
+        if px <= 65 then
+            atmosphereFactor = 0.005+(75-px)*0.002
             colorSky   = &hffc2be
             colorSky   = rgbAdd(&hffc2be, -128)
             MAX_DISTANCE = 100 SHL PREC_SHIFT
-        elseif px <= 150 then
+        elseif px <= 75 then
             colorSky   = &hffc2be
             colorSky   = rgbAdd(&hffc2be, -128)
-            colorSky   = rgbMix(colorSky, &h000000, abs(px-150))
+            colorSky   = rgbMix(colorSky, &h000000, abs(px-75))
             MAX_DISTANCE = 1024 SHL PREC_SHIFT
         else
             atmosphereFactor = 0.005
-            colorSky   = rgbMix(&hbec2ff, &h000000, 1.0-(0.5*(1-(seconds mod 600)/300)), 2.0*(1-(seconds mod 600)/300))
+            colorSky = &hbec2ff
+            'colorSky   = rgbMix(&hbec2ff, &h000000, 1.0-(0.5*(1-(seconds mod 600)/300)), 2.0*(1-(seconds mod 600)/300))
         end if
     
         delta = UpdateSpeed()
@@ -569,10 +829,24 @@ sub main()
         pa -= mx*0.20
         
         midline -= my*(SCREEN_Y/300)
-        if midline < -HALF_Y then midline = -HALF_Y
-        if midline >  SCREEN_Y*1.5 then midline = SCREEN_Y*1.5
+        if midline <  0 then midline = 0
+        if midline >  HALF_Y*0.5 then midline = HALF_Y*0.5
+        
+        rotateZ -= my*(SCREEN_Y/300)*0.3333
+        if rotateZ < -90 then rotateZ = -90
+        if rotateZ >  90 then rotateZ =  90
+        if rotateZ = 0 then rotateZ = 0.0001
+        'if midline < -HALF_Y then midline = -HALF_Y
+        'if midline >  SCREEN_Y*1.5 then midline = SCREEN_Y*1.5
         'if midline > HALF_Y*10 then midline = HALF_Y*10
         fov = 1'1+abs(midline-HALF_Y)*0.00125*(300/SCREEN_Y)
+        
+        Game.angleY = pa
+        Game.angleZ = rotateZ
+        vf = Vector(1, 0, 0)
+        vf = vectorRotateY(vf, rotateZ)
+        vf = vectorRotateZ(vf, pa)
+        Game.forward = vectorUnit(vf)
         
         map = @highres
         
@@ -615,13 +889,43 @@ sub main()
         
         static fireTimer as double
         static mouseLetGo as integer
+        static dAngleZ as double
         'fireTimer = iif(fireTimer-delta < 0, 0, fireTimer-delta)
         fireTimer -= delta
         if fireTimer < 0 then fireTimer = 0
         if (mousedown_left and (fireTimer = 0)) or (mousedown_left and mouseLetGo) then
-            fireTimer = 0.19
-            darts.fire(Game.position, Game.forward, 100, 1)_
-                ->setCollideCallback(@dart_collide)
+            fireTimer = 0.45
+            dim position as Vector
+            dim forward as Vector
+            
+            position = Game.position
+            forward  = Game.forward
+            
+            'forward.z = forward.z * (midline-HALF_Y)*
+            
+            'forward.z *= 0.6325
+            'forward.z = ha*0.0029
+            
+            'centerDist = *(pixels+HALF_Y*pitch+HALF_X-1) shr 24
+            'forward = vectorUnit((Game.forward*cast(double, centerDist))-vectorRight(Game.forward)*0.50)
+            
+            '// add player's velocity to forward vector
+            
+            darts.fire(position, forward, 125, rgb(208+rnd(1)*47, 208+rnd(1)*47, 108+rnd(1)*147))_
+                ->setCollideCallback(@dart_collide)_
+                ->setRenderCallback(@dart_renderRGB)_
+                ->setAngleY( Game.angleY )_
+                ->setAngleX(-Game.angleZ )'_
+                '->setMoveCallback(@dart_move_simple)
+            'darts.fire(Vector(0.25, -0.25, -1.0), Vector(0, 0, 1), 125, rgb(208+rnd(1)*47, 208+rnd(1)*47, 108+rnd(1)*147))_
+            '    ->setRenderCallback(@dart_renderRGB_static)_
+            '    ->setAngleY(30)_
+            '    ->setAngleX(30)_
+            '    ->setExpiresInSeconds(0.20)_
+            '    ->setMoveCallback(@dart_move_simple)_
+            '    ->setCheckBounds(false)
+            
+            dAngleZ = Game.angleZ
             SOUND_PlaySound "shoot2"
             mouseLetGo = 0
         end if
@@ -639,14 +943,18 @@ sub main()
             pa -= 100*delta
         end if
         if keys[SDL_SCANCODE_PAGEUP] then
-            midline += 300*delta
+            'midline += 300*delta
+            rotateZ += 60*delta
+            if rotateZ < -90 then rotateZ = -90
+            if rotateZ >  90 then rotateZ =  90
+            if rotateZ = 0 then rotateZ = 0.0001
         end if
         if keys[SDL_SCANCODE_PAGEDOWN] then
-            midline -= 300*delta
-        end if
-        if keys[SDL_SCANCODE_0] then
-            midline = HALF_Y
-            pa = 0
+            'midline -= 300*delta
+            rotateZ -= 60*delta
+            if rotateZ < -90 then rotateZ = -90
+            if rotateZ >  90 then rotateZ =  90
+            if rotateZ = 0 then rotateZ = 0.0001
         end if
         
         if keys[SDL_SCANCODE_LSHIFT]  then
@@ -663,8 +971,7 @@ sub main()
         if keys[SDL_SCANCODE_A] then
             select case mode
             case 1
-                vf  = -vectorRight(Game.forward) * speed * 0.75 * delta
-                Game.position += vf
+                Game.position -= getRightVector() * speed * 0.75 * delta
             case 2
                 vf  = -vectorRight(Game.forward) * speed * 0.75 * delta
                 Game.position.x += vf.x: doCollisionCheckX(vf)
@@ -674,12 +981,23 @@ sub main()
         if keys[SDL_SCANCODE_D] then
             select case mode
             case 1
-                vf  = vectorRight(Game.forward) * speed * 0.75 * delta
-                Game.position += vf
+                Game.position += getRightVector() * speed * 0.75 * delta
             case 2
                 vf  = vectorRight(Game.forward) * speed * 0.75 * delta
                 Game.position.x += vf.x: doCollisionCheckX(vf)
                 Game.position.y += vf.y: doCollisionCheckY(vf)
+            end select
+        end if
+        if keys[SDL_SCANCODE_LEFTBRACKET] then
+            select case mode
+            case 1
+                Game.angleX -= 300 * delta
+            end select
+        end if
+        if keys[SDL_SCANCODE_RIGHTBRACKET] then
+            select case mode
+            case 1
+                Game.angleX += 300 * delta
             end select
         end if
         'static stepTimer as double
@@ -715,7 +1033,7 @@ sub main()
                 vf = -Game.forward * speed * 0.75 * delta
                 Game.position.x += vf.x: doCollisionCheckX(vf)
                 Game.position.y += vf.y: doCollisionCheckY(vf)
-                Game.position.z += vf.z: doCollisionCheckZ(vf)
+                Game.position.z += vf.z*0.2222: doCollisionCheckZ(vf)
                 if dv = 0 then
                     strafeAngle -= delta*150*iif(keys[SDL_SCANCODE_LSHIFT], speed*6, speed)
                 end if
@@ -753,63 +1071,85 @@ sub main()
         
         strafeValue = cos(strafeAngle*TO_RAD)*0.01
         
-        dim za as double
-        za = ha*(90/SCREEN_Y)
+        'dim za as double
+        'za = ha*(90/SCREEN_Y)
+        '
+        'if za <= -45 then za = -45
+        'if za >=  45 then za =  45
+        'if za = 0 then za = 0.0001
         
-        if za <= -90 then za = -90
-        if za >=  90 then za =  90
-        if za = 0 then za = 0.0001
-        
-        Game.angleY = pa
-        vf = Vector(1, 0, 0)
-        vf = vectorRotateY(vf, za)
-        vf = vectorRotateZ(vf, pa)
-        Game.forward = vectorUnit(vf)
+        Game.angleY  = pa
+        'Game.angleX  = rotateZ
+        Game.forward = getForwardVector()
         Game.midline = midline
+        
+        if keys[SDL_SCANCODE_0] then
+            midline = HALF_Y
+            pa = 0
+            rotateZ = 0
+            Game.angleX = 0
+            Game.angleY = 0
+            Game.angleZ = 0
+            Game.forward.x = 1
+            Game.forward.y = 0
+            Game.forward.z = 0
+        end if
         
         px = Game.position.x
         py = Game.position.y
         ph = Game.position.z
+        pz = Game.position.z
         
         '// RAYCAST BEGIN  =============================================
-        dim vps as Vector
-        dim vpr as Vector
-        dim down as Vector
-        dim dz as double
+        'dim vps as Vector
+        'dim vpr as Vector
         
-        if za < 0 then
-            dz = ph-map->getCell(int(px), int(py))->getFloorHeight()*0.01
-        else
-            dz = map->getCell(int(px), int(py))->getCeilHeight()*0.01-ph
-        end if
+        'vf    = getForwardVector()
+        'vr    = getRightVector()
+        'vup   = getUpVector()
+        '
+        'vray = vf-vr
+        'vr /= HALF_X
         
-        vf    = vectorFromAngle(pa)
-        vr    = vectorRight(vf)
+        dim vraytop as Vector
+        dim vraybtm as Vector
         
-        Game.forward.z = 0
+        vf = getForwardVector()
+        vr = getRightVector()
+        vu = getUpVector()
+        vraytop = vf-vr+vu
+        vraybtm = vf-vr-vu
         
-        'vray.x = vf.x*(1-abs(Game.forward.z))-vr.x*abs(1)*(1-abs(Game.forward.z))
-        'vray.y = vf.y*(1-abs(Game.forward.z))-vr.y*abs(1)*(1-abs(Game.forward.z))
-        vray = vf-vr*(1-abs(Game.forward.z))
-        'vr.x /= HALF_X: vr.y /= HALF_X
-        vps.x = -vf.x-vr.x
-        vps.y = -vf.y-vr.y
-        vps *= abs(Game.forward.z)*dz
-        vpr = vr*abs(Game.forward.z)*dz
-        'vps *= abs(Game.forward.z)
-        'vr.x *= abs(1)*(1-abs(Game.forward.z))
-        'vr.y *= abs(1)*(1-abs(Game.forward.z))
-        vr *= (1-abs(Game.forward.z))
         vr /= HALF_X
-        vpr /= HALF_X
         
-        'down.x = Game.forward.x*dz
-        'down.y = Game.forward.y*dz
-        down = Game.forward*(dz/abs(Game.forward.z))
+        'vrayTop = vectorRotate
         
-        dim downSize as double
-        downSize = vectorSize(down)
         
+        'dim gz as double
+        'gz = Game.forward.z
+        'Game.forward.z = 0 '- leave value for looking straight down/up
+        '
+        'vray = vf-vr*cos(Game.angleZ*TO_RAD) '(1-abs(Game.forward.z))
+        'vps.x = -vf.x-vr.x
+        'vps.y = -vf.y-vr.y
+        'vps *= abs(Game.forward.z)*dz
+        'vpr = vr*abs(Game.forward.z)*dz
+        'vr *= cos(Game.angleZ*TO_RAD) '(1-abs(Game.forward.z))
+        'vr /= HALF_X
+        'vpr /= HALF_X
+        '
+        'dim zdistAdd as double
+        'dim yAdd as double
+        'zdistAdd = vectorSize(vf)*dz*0.5
+        'yAdd = -Game.forward.z*HALF_Y
+        '
+        'down = Game.forward*(dz/abs(Game.forward.z))
+        '
+        'dim downSize as double
+        'downSize = vectorSize(down)
+        '
+        '
+        'Game.forward.z = gz
         
         dim colr as uinteger
         dim xDistMax as integer, yDistMax as integer
@@ -853,6 +1193,9 @@ sub main()
         dim pt as integer
         dim zBufferValue as uinteger
         
+        dim mdn as double
+        mdn = HALF_Y+SCREEN_Y*Game.forward.z
+        
         SDL_LockTexture(texture, null, @pixels, @pitch)
         pitch = (pitch shr 2)
         
@@ -865,7 +1208,6 @@ sub main()
         dim xStop as integer ptr
         dim yStop as integer ptr
         
-        dim dat as integer
         
         dim sk as integer
         sk = (midline-HALF_Y)
@@ -884,6 +1226,7 @@ sub main()
         '    pixelNow += pt
         'wend
         yStop = pixels+SCREEN_Y*pitch
+        colr = (colr and &h00ffffff) or &h7f000000
         while pixelNow < yStop
             xStop = pixelNow + SCREEN_X
             while pixelNow < xStop: *pixelNow = colr: pixelNow += 1: wend
@@ -893,267 +1236,485 @@ sub main()
         wend
         pixelNow = pixels
         
-        dim fx as double, fy as double, fo as double
         dim c as integer    
         dim ix as integer, iy as integer
-        dim savePx as double, savePy as double
-        dim cell as FlatMapCell ptr
+        'dim savePx as double, savePy as double
+        dim tcell as FlatMapCell ptr
+        dim bcell as FlatMapCell ptr
         xPix = -1
         
+        dim vrotatex as Vector
+        vrotatex = vectorFromAngle(Game.angleZ)
+    
         for f = 0 to SCREEN_X-1
             xPix += 1
             map = @highres
             
-            savePx = px: savePy = py
-            px = px+vps.x: py = py+vps.y
+            'savePx = px: savePy = py
+            'px = px+vps.x: py = py+vps.y
             
         
-            bottom = SCREEN_Y-1
+            bottom  = SCREEN_Y-1
+            cbottom = 0
             
             '// EDGE-OF-MAP INTERSECTION ===============================
-            xDistMax = 0
-            yDistMax = 0
-            fx = 0: fy = 0
+            'xDistMax = 0
+            'yDistMax = 0
+            '
+            'if px < 0 or px >= map->getWidth() then
+            '    fx += abs(iif(vray.x > 0, -px, MAP_WIDTH-px)/vray.x)
+            'end if
+            '
+            'fx += abs(iif(vray.x > 0, map->getWidth()-1-px, -px)/vray.x)
+            '
+            'if fx > MAX_INT then fx = MAX_INT
+            'xDistMax = fx*PREC
+            '
+            'if py < 0 or py >= map->getHeight() then
+            '    fy += abs(iif(vray.y > 0, -py, MAP_HEIGHT-py)/vray.y)
+            'end if
+            '
+            'fy += abs(iif(vray.y > 0, map->getHeight()-1-py, -py)/vray.y)
+            '
+            'if fy > MAX_INT then fy = MAX_INT
+            'yDistMax = fy*PREC
+            '
+            'distMax = iif(xDistMax < yDistMax, xDistMax, yDistMax)'-1000000
+            'if distMax > MAX_DISTANCE then distMax = MAX_DISTANCE
             
-            if px < 0 or px >= map->getWidth() then
-                fx += abs(iif(vray.x > 0, -px, MAP_WIDTH-px)/vray.x)
-            end if
+            'distMax = MAX_DISTANCE
+            distMax = 300 shl PREC_SHIFT
             
-            fx += abs(iif(vray.x > 0, map->getWidth()-1-px, -px)/vray.x)
-            
-            if fx > MAX_INT then fx = MAX_INT
-            xDistMax = fx*PREC
-            
-            if py < 0 or py >= map->getHeight() then
-                fy += abs(iif(vray.y > 0, -py, MAP_HEIGHT-py)/vray.y)
-            end if
-            
-            fy += abs(iif(vray.y > 0, map->getHeight()-1-py, -py)/vray.y)
-            
-            if fy > MAX_INT then fy = MAX_INT
-            yDistMax = fy*PREC
-            
-            distMax = iif(xDistMax < yDistMax, xDistMax, yDistMax)'-1000000
-            if distMax > MAX_DISTANCE then distMax = MAX_DISTANCE
-            
-            '// CLOSEST INTERSECTION  ==================================
-            xHit = 0
+            '===========================================================
+            '  CLOSEST INTERSECTION
+            '===========================================================
+            '
+            '  \\  //
+            '   \\//
+            '   //\\
+            '  //  \\
+            '
+            '===========================================================
             if px >= 0 and px < map->getWidth() then
-                fx = iif(vray.x > 0, int(px+1)-px, int(px)-px)
+                ftx = iif(vraytop.x > 0, int(px+1)-px, int(px)-px)
+                fbx = iif(vraybtm.x > 0, int(px+1)-px, int(px)-px)
             else
-                fx = iif(vray.x > 0, -px, MAP_WIDTH-px)
+                ftx = iif(vraytop.x > 0, -px, MAP_WIDTH-px)
+                fbx = iif(vraybtm.x > 0, -px, MAP_WIDTH-px)
             end if
-            fy = vray.y*abs(fx/vray.x)
-            if fy >  MAX_INT then fy =  MAX_INT
-            if fy < -MAX_INT then fy = -MAX_INT
-            ex = iif(vray.x >= 0, 0, -1)
-            ey = 0
             
-            fo = abs(fx/vray.x)
-            if fo > MAX_INT then fo = MAX_INT
-            xDist = fo*PREC
+            fdist = abs(ftx/vraytop.x): if fdist > MAX_INT then fdist = MAX_INT
+            xtDist = fdist*PREC
             
-            dx = (fx+px)*PREC
-            dy = (fy+py)*PREC
+            fty = vraytop.y*fdist
+            if fty >  MAX_INT then fty =  MAX_INT
+            if fty < -MAX_INT then fty = -MAX_INT
+            ftz = vraytop.z*fdist
+            if ftz >  MAX_INT then ftz =  MAX_INT
+            if ftz < -MAX_INT then ftz = -MAX_INT
             
-            x_dx = dx: x_dy = dy
+            fdist = abs(fbx/vraybtm.x): if fdist > MAX_INT then fdist = MAX_INT
+            xbDist = fdist*PREC
             
-            yHit = 0
+            fby = vraybtm.y*fdist
+            if fby >  MAX_INT then fby =  MAX_INT
+            if fby < -MAX_INT then fby = -MAX_INT
+            fbz = vraybtm.z*fdist
+            if fbz >  MAX_INT then fbz =  MAX_INT
+            if fbz < -MAX_INT then fbz = -MAX_INT
+            
+            x_tx  = (ftx+px)*PREC: x_ty = (fty+py)*PREC: x_tz = (ftz+pz)*PREC
+            x_bx  = (fbx+px)*PREC: x_by = (fby+py)*PREC: x_bz = (fbz+pz)*PREC
+            x_etx = iif(vraytop.x >= 0, 0, -1): x_ety = 0
+            x_ebx = iif(vraybtm.x >= 0, 0, -1): x_eby = 0
+            
+            '===========================================================
+            '  CLOSEST INTERSECTION
+            '===========================================================
+            '
+            '  \\  //
+            '   \\//
+            '    ||
+            '    ||
+            '
+            '===========================================================
             if py >= 0 and py < map->getHeight() then
-                fy = iif(vray.y > 0, int(py+1)-py, int(py)-py)
+                fty = iif(vraytop.y > 0, int(py+1)-py, int(py)-py)
+                fby = iif(vraybtm.y > 0, int(py+1)-py, int(py)-py)
             else
-                fy = iif(vray.y > 0, -py, MAP_HEIGHT-py)
-            end if
-            fx = vray.x*abs(fy/vray.y)
-            if fx >  MAX_INT then fx =  MAX_INT
-            if fx < -MAX_INT then fx = -MAX_INT
-            ex = 0
-            ey = iif(vray.y >= 0, 0, -1)
-            
-            fo = abs(fy/vray.y)
-            if fo > MAX_INT then fo = MAX_INT
-            yDist = fo*PREC
-            
-            dy = (fy+py)*PREC
-            dx = (fx+px)*PREC
-            
-            y_dx = dx: y_dy = dy
-            
-            if xDist < yDist then
-                dx = x_dx: dy = x_dy
-                ex = x_ex: ey = x_ey
-                dist = xDist
-            else
-                dy = y_dy: dx = y_dx
-                ey = y_ey: ex = y_ex
-                dist = yDist
+                fty = iif(vraytop.y > 0, -py, MAP_HEIGHT-py)
+                fby = iif(vraybtm.y > 0, int(py+1)-py, int(py)-py)
             end if
             
-            lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
+            fdist = abs(fty/vraytop.y): if fdist > MAX_INT then fdist = MAX_INT
+            ytDist = fdist*PREC
             
-            sliceSize = HEIGHT_RATIO / dist
-            zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
+            ftx = vraytop.x*fdist
+            if ftx >  MAX_INT then ftx =  MAX_INT
+            if ftx < -MAX_INT then ftx = -MAX_INT
+            ftz = vraytop.z*fdist
+            if ftz >  MAX_INT then ftz =  MAX_INT
+            if ftz < -MAX_INT then ftz = -MAX_INT
+            
+            fdist = abs(fby/vraybtm.y): if fdist > MAX_INT then fdist = MAX_INT
+            ybDist = fdist*PREC
+            
+            fbx = vraybtm.x*fdist
+            if fbx >  MAX_INT then fbx =  MAX_INT
+            if fbx < -MAX_INT then fbx = -MAX_INT
+            fbz = vraybtm.z*fdist
+            if fbz >  MAX_INT then fbz =  MAX_INT
+            if fbz < -MAX_INT then fbz = -MAX_INT
+            
+            y_tx = (ftx+px)*PREC: y_ty = (fty+py)*PREC: y_tz = (ftz+pz)*PREC
+            y_bx = (fbx+px)*PREC: y_by = (fby+py)*PREC: y_bz = (fbz+pz)*PREC
+            y_ety = iif(vraytop.y >= 0, 0, -1): y_etx = 0
+            y_eby = iif(vraybtm.y >= 0, 0, -1): y_ebx = 0
+            
+            '===========================================================
+            '
+            '  ??? WHO IS CLOSER ???
+            '
+            '===========================================================
+            if xtDist < ytDist then
+                tx    = x_tx : ty  = x_ty : tz = x_tz
+                etx   = x_etx: ety = x_ety
+                tDist = xtDist
+            else
+                ty    = y_tx : ty  = y_ty : tz = y_tz
+                ety   = y_etx: ety = y_ety
+                tDist = ytDist
+            end if
+            
+            if xbDist < ybDist then
+                bx    = x_bx : by  = x_by : bz = x_bz
+                ebx   = x_ebx: eby = x_eby
+                bDist = xbDist
+            else
+                by    = y_bx : by  = y_by : bz = y_bz
+                eby   = y_ebx: eby = y_eby
+                bDist = ybDist
+            end if
+            
             dim h as double
             dim ch as double
+            dim zdist as double
+            dim rxy as double
+            dim roy as double, roz as double
+            dim x as double, y as double, z as double
+            
+            dist  = tDist '// shouldn't matter -- tDist and bDist should be the same
+            zdist = dist / PREC
+            
+            '===========================================================
+            '
+            '  WE HAVE MAP X
+            '  WE HAVE MAP Y
+            '  NOW GET Y and Z in 3D SPACE
+            '    * Y is floor/ceil height
+            '    * Z is distance
+            '  IF 3D POINT IS INSIDE FOV
+            '    * Rotate Y and Z
+            '    * Get SCREEN Y from Y/Z
+            '
+            '===========================================================
             h   = map->getCell(int(px), int(py))->getFloorHeight()*0.01
             ch  = map->getCell(int(px), int(py))->getCeilHeight()*0.01
-            top = midline+int(sliceSize*((ph-h)+strafeValue))+1
+                        
+            '-----------------------------------------------------------
+            ' check should change to dot product calculations
+            ' to support 360 degree rotation
+            ' (would need to check FOV lft/rgt if angle > 45)
+            '-----------------------------------------------------------
+            dim doFloor as integer
+            dim doCeil  as integer
+            doFloor = 1
+            doCeil  = 1
             
-            cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
+            'if h >= tz and h <= bz then '// should only need to be h < bz
+                y       = pz-h+strafeValue
+                roy     = y* vrotatex.x + zdist*vrotatex.y
+                roz     = y*-vrotatex.y + zdist*vrotatex.x
+                top     = iif(roz < 0.0001, SCREEN_Y, int(SCREEN_Y*roy/roz+HALF_Y))
+            'else
+            '    doFloor = 0
+            'end if
+            
+            'if ch >= tz and ch <= bz then '// should only need to be h > tz
+                y       = pz-ch+strafeValue
+                roy     = y* vrotatex.x + zdist*vrotatex.y
+                roz     = y*-vrotatex.y + zdist*vrotatex.x
+                cbottom = iif(roz < 0.0001, -1, int(SCREEN_Y*roy/roz+HALF_Y))
+            'else
+            '    doCeil  = 0
+            'end if
+            
+            zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
+            
             ctop = 0
             yPix = bottom
             cyPix = ctop
             pixelNow = pixels+pitch*yPix+xPix
             cPixelNow = pixels+pitch*cyPix+xPix
-            cell = map->getCell(int(px), int(py))
-            '// draw ctop
-            if cbottom >= bottom then cbottom = bottom
-            if top <= ctop then top = ctop
-            if cbottom >= ctop then
-                colr = tileColors(cell->getCeilTile())
-                if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
-                if colr <> &hff00ff then
-                    'colr = rgbAdd(colr, map->normals(int(px), int(py)))
-                    colr = ((colr and &h00ffffff) or zBufferValue)
-                    while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
-                else
-                    cPixelNow += pitch*(cbottom-cyPix)
-                    cyPix = cbottom
+            tcell = map->getCell(int(px), int(py))
+            bcell = tcell
+            
+            if doCeil  and (cbottom >= bottom) then cbottom = bottom
+            if doFloor and (top <= ctop)       then top = ctop
+            
+            '===========================================================
+            '
+            '  DRAW CEILING
+            '
+            '===========================================================
+            if doCeil then
+                if cbottom >= ctop then
+                    colr = tileColors(tcell->getCeilTile())
+                    if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
+                    if colr <> &hff00ff then
+                        'colr = rgbAdd(colr, map->normals(int(px), int(py)))
+                        colr = ((colr and &h00ffffff) or zBufferValue)
+                        while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
+                    else
+                        cPixelNow += pitch*(cbottom-cyPix)
+                        cyPix = cbottom
+                    end if
+                    ctop = cbottom+1
                 end if
-                ctop = cbottom+1
             end if
-            '// draw top
-            if top <= bottom then
-                colr = tileColors(cell->getFloorTile())
-                colr = rgbAdd(colr, cell->getNormal())
-                dat = map->getCell(int(px), int(py))->getFlags()
-                                
-                dc = (dist shr PREC_SHIFT)*atmosphereFactor
-                dc = dc*dc*dc
-                dc1 = 1/(dc+1)
-                skyR  = (colorSky  shr 16) and 255: skyG  = (colorSky  shr 8) and 255: skyB  = (colorSky  and 255)
-                if cell->hasFlag( CellFlags.water ) then
-                    dim add as integer
-                    add = 7-(int(((cos(int(px)+seconds*0.002)*TO_RAD)*(sin(seconds*0.002-int(py))*TO_RAD)*3000000)) and 15)
-                    r = &h5c+add: g = &h53+add: b = &hdb+add
-                    wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
-                    colr = rgb((r+wallR)*0.5, (g+wallG)*0.5, (b+wallB)*0.5)
-                    wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
-                else
-                    wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+            '===========================================================
+            '
+            '  DRAW FLOOR
+            '
+            '===========================================================
+            if doFloor then
+                if top <= bottom then
+                    colr = tileColors(bcell->getFloorTile())
+                    colr = rgbAdd(colr, bcell->getNormal())
+                                    
+                    dc = (dist shr PREC_SHIFT)*atmosphereFactor
+                    dc = dc*dc*dc
+                    dc1 = 1/(dc+1)
+                    skyR  = (colorSky  shr 16) and 255: skyG  = (colorSky  shr 8) and 255: skyB  = (colorSky  and 255)
+                    if bcell->hasFlag( CellFlags.water ) then
+                        dim add as integer
+                        add = 7-(int(((cos(int(px)+seconds*0.002)*TO_RAD)*(sin(seconds*0.002-int(py))*TO_RAD)*3000000)) and 15)
+                        r = &h5c+add: g = &h53+add: b = &hdb+add
+                        wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+                        colr = rgb((r+wallR)*0.5, (g+wallG)*0.5, (b+wallB)*0.5)
+                        wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+                    else
+                        wallR = (colr shr 16) and 255: wallG = (colr shr 8) and 255: wallB = (colr and 255)
+                    end if
+                    r = (wallR+(skyR*dc))*dc1
+                    g = (wallG+(skyG*dc))*dc1
+                    b = (wallB+(skyB*dc))*dc1
+                    if r > 255 then r = 255: if r < 0 then r = 0
+                    if g > 255 then g = 255: if g < 0 then g = 0
+                    if b > 255 then b = 255: if b < 0 then b = 0
+                    colr = rgb(r, g, b)
+                    if top < 0 then top = 0
+                    colr = ((colr and &h00ffffff) or zBufferValue)
+                    while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
+                    bottom = top-1
                 end if
-                r = (wallR+(skyR*dc))*dc1
-                g = (wallG+(skyG*dc))*dc1
-                b = (wallB+(skyB*dc))*dc1
-                if r > 255 then r = 255: if r < 0 then r = 0
-                if g > 255 then g = 255: if g < 0 then g = 0
-                if b > 255 then b = 255: if b < 0 then b = 0
-                colr = rgb(r, g, b)
-                if top < 0 then top = 0
-                colr = ((colr and &h00ffffff) or zBufferValue)
-                while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
-                bottom = top-1
             end if
             '// draw side
-            cell = map->getCell(lx, ly)
-            h = cell->getFloorHeight()*0.01
-            ch = cell->getCeilHeight()*0.01
-            top = midline+int(sliceSize*((ph-h)+strafeValue))+1
             
-            cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
-            if cbottom >= bottom then cbottom = bottom
-            if top <= ctop then top = ctop
-            if top <= bottom then
-                colr = tileColors(cell->getFloorTile())
-                colr = rgbAdd(colr, cell->getNormal())
-                colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
-                if top < 0 then top = 0
-                colr = ((colr and &h00ffffff) or zBufferValue)
-                while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
-                bottom = top-1
+            tmx = (tx shr PREC_SHIFT)+etx: tmy = (ty shr PREC_SHIFT)+ety
+            bmx = (bx shr PREC_SHIFT)+ebx: bmy = (by shr PREC_SHIFT)+eby
+            
+            tcell = map->getCell(tmx, tmy)
+            h = tcell->getFloorHeight()*0.01
+            ch = tcell->getCeilHeight()*0.01
+            
+            doFloor = 1
+            doCeil  = 1
+            
+            'if h >= tz and h <= bz then '// should only need to be h < bz
+                y       = pz-h+strafeValue
+                roy     = y* vrotatex.x + zdist*vrotatex.y
+                roz     = y*-vrotatex.y + zdist*vrotatex.x
+                top     = iif(roz < 0.0001, SCREEN_Y, int(SCREEN_Y*roy/roz+HALF_Y))
+            'else
+            '    doFloor = 0
+            'end if
+            
+            if (tmx <> bmx) or (tmy <> bmy) then '// then rays have split, need to do another ceil/floor/side-ceil/side-floor calculation for second ray
+                bcell = map->getCell(bmx, bmy)
+                h     = bcell->getFloorHeight()*0.01
+                ch    = bcell->getCeilHeight()*0.01
+            else
+                bcell = tcell
             end if
-            if cbottom >= ctop then
-                colr = tileColors(cell->getCeilTile())
-                if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
-                if colr <> &hff00ff then
-                    'colr = rgbAdd(colr, map->normals(lx, ly))
-                    colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
-                    colr = colr or zBufferValue
-                    while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
-                else
-                    cPixelNow += pitch*(cbottom-cyPix)
-                    cyPix = cbottom
+            
+            'if ch >= tz and ch <= bz then '// should only need to be h > tz
+                y       = pz-ch+strafeValue
+                roy     = y* vrotatex.x + zdist*vrotatex.y
+                roz     = y*-vrotatex.y + zdist*vrotatex.x
+                cbottom = iif(roz < 0.0001, -1, int(SCREEN_Y*roy/roz+HALF_Y))
+            'else
+            '    doCeil  = 0
+            'end if
+            
+            zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
+            
+            if doCeil  and (cbottom >= bottom) then cbottom = bottom
+            if doFloor and (top <= ctop)       then top = ctop
+            
+            '===========================================================
+            '
+            '  DRAW SIDE FLOOR
+            '
+            '===========================================================
+            if doFloor then
+                if top <= bottom then
+                    colr = tileColors(tcell->getFloorTile())
+                    colr = rgbAdd(colr, tcell->getNormal())
+                    colr = rgbAdd(colr, iif(xbDist > ybDist, 10, -10))
+                    if top < 0 then top = 0
+                    colr = ((colr and &h00ffffff) or zBufferValue)
+                    while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
+                    bottom = top-1
                 end if
-                ctop = cbottom+1
             end if
-            '// INTERSECTIONS UNTIL EDGE-OF-MAP/MAX-DISTANCE  ==========
-            dim x_di as integer
-            dim y_di as integer
+            '===========================================================
+            '
+            '  DRAW SIDE CEILING
+            '
+            '===========================================================
+            if doCeil then
+                if cbottom >= ctop then
+                    colr = tileColors(bcell->getCeilTile())
+                    if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
+                    if colr <> &hff00ff then
+                        'colr = rgbAdd(colr, map->normals(lx, ly))
+                        colr = rgbAdd(colr, iif(xtDist > ytDist, 10, -10))
+                        colr = ((colr and &h00ffffff) or zBufferValue)
+                        while cyPix <= cbottom: *(cpixelNow) = colr: cpixelNow += pitch: cyPix +=1: wend
+                    else
+                        cPixelNow += pitch*(cbottom-cyPix)
+                        cyPix = cbottom
+                    end if
+                    ctop = cbottom+1
+                end if
+            end if
             
-            x_ax = iif(vray.x >= 0, 1, -1)*PREC
-            x_ay = (vray.y / abs(vray.x))*PREC
-            x_ex = iif(vray.x >= 0, 0, -1)
-            x_ey = 0
-            x_di = abs(PREC/vray.x)
+            '===========================================================
+            '
+            '  INTERSECTIONS UNTIL EDGE-OF-MAP/MAX-DISTANCE
+            '
+            '  INITIAL CALCULATIONS
+            '
+            '===========================================================
+            dim x_tdi as uinteger, x_bdi as uinteger '// top/btm distance increments for X intersections
+            dim y_tdi as uinteger, y_bdi as uinteger '// top/btm distance increments for Y intersections
             
-            y_ay = iif(vray.y >= 0, 1, -1)*PREC
-            y_ax = (vray.x / abs(vray.y))*PREC
-            y_ey = iif(vray.y >= 0, 0, -1)
-            y_ex = 0
-            y_di = abs(PREC/vray.y)
+            x_atx = iif(vraytop.x >= 0, 1, -1)*PREC
+            x_aty = (vraytop.y / abs(vraytop.x))*PREC
+            x_atz = (vraytop.z / abs(vraytop.x))*PREC
+            x_etx = iif(vraytop.x >= 0, 0, -1): x_ety = 0
+            x_tdi = abs(PREC/vraytop.x)
             
-            dim xAlign as integer, yAlign as integer
-            dim switchedToMed as integer, switchedToLow as integer
-            dim switchedToSub as integer
+            x_abx = iif(vraybtm.x >= 0, 1, -1)*PREC
+            x_aby = (vraybtm.y / abs(vraybtm.x))*PREC
+            x_abz = (vraybtm.z / abs(vraybtm.x))*PREC
+            x_ebx = iif(vraybtm.x >= 0, 0, -1): x_eby = 0
+            x_bdi = abs(PREC/vraybtm.x)
             
-            switchedToMed = 0: switchedToLow = 0: switchedToSub = 0
+            y_aty = iif(vraytop.y >= 0, 1, -1)*PREC
+            y_atx = (vraytop.x / abs(vraytop.y))*PREC
+            y_atz = (vraytop.z / abs(vraytop.y))*PREC
+            y_ety = iif(vraytop.y >= 0, 0, -1): y_etx = 0
+            y_tdi = abs(PREC/vraytop.y)
+            
+            y_aby = iif(vraybtm.y >= 0, 1, -1)*PREC
+            y_abx = (vraybtm.x / abs(vraybtm.y))*PREC
+            y_abz = (vraybtm.z / abs(vraybtm.y))*PREC
+            y_eby = iif(vraybtm.y >= 0, 0, -1): y_ebx = 0
+            y_bdi = abs(PREC/vraybtm.y)
+            
             dim switchCount as integer
             dim nextDist as double
             switchCount = 0: nextDist = 160*PREC'96'160'32'160
             
+            dist = tDist
+            
+            '===========================================================
+            '
+            '  INTERSECTIONS UNTIL EDGE-OF-MAP/MAX-DISTANCE
+            '
+            '  TARGET THAT EXPLOSION AND FIRE!!!
+            '
+            '===========================================================
             do while dist < distMax
                 
-                if xDist < yDist then
-                    x_dx  += x_ax: x_dy += x_ay
-                    xDist += x_di
-                    'if map->callbacks(x_dx, x_dy) <> 0 then
-                    '    map->callbacks(x_dx, x_dy)(x_dx, y_dy, 0, 0)
-                    'end if
+                if xtDist < ytDist then
+                    x_tx   += x_atx: x_ty += x_aty: x_tz += x_atz
+                    xtDist += x_tdi
                 else
-                    y_dy  += y_ay: y_dx += y_ax
-                    yDist += y_di
-                    'if map->callbacks(y_dx, y_dy) <> 0 then
-                    '    map->callbacks(y_dx, y_dy)(0, 0, y_dx, y_dy)
-                    'end if
+                    y_tx   += y_atx: y_ty += y_aty: y_tz += y_atz
+                    ytDist += y_tdi
                 end if
                 
-                if xDist < yDist then
-                    dx = x_dx: dy = x_dy
-                    ex = x_ex: ey = x_ey
-                    dist = xDist
+                if xbDist < ybDist then
+                    x_bx   += x_abx: x_by += x_aby: x_bz += x_abz
+                    xbDist += x_bdi
                 else
-                    dy = y_dy: dx = y_dx
-                    ey = y_ey: ex = y_ex
-                    dist = yDist
+                    y_bx   += y_abx: y_by += y_aby: y_bz += y_abz
+                    ybDist += y_bdi
                 end if
                 
-                sliceSize = HEIGHT_RATIO / dist
-                zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
+                if xtDist < ytDist then
+                    tx    =  x_tx: ty  = x_ty: tz = x_tz
+                    etx   = x_etx: ety = x_ety
+                    tDist = xtDist
+                else
+                    tx  =  y_tx: ty  = y_ty: tz = y_tz
+                    etx = y_etx: ety = y_ety
+                    tDist = ytDist
+                end if
+                
+                if xbDist < ybDist then
+                    bx    =  x_bx: by  = x_by: bz = x_bz
+                    ebx   = x_ebx: eby = x_eby
+                    bDist = xbDist
+                else
+                    bx    =  y_bx: by  = y_by: bz = y_bz
+                    ebx   = y_ebx: eby = y_eby
+                    bDist = ybDist
+                end if
+                
+                dist  = tdist
+                zdist = dist / PREC
+                
                 if dist > distMax then exit do
                 
-                '// draw top
-                top = midline+int(sliceSize*((ph-h)+strafeValue))+1
-                cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
+                'if h >= tz and h <= bz then '// should only need to be h < bz
+                    y       = pz-h+strafeValue
+                    roy     = y* vrotatex.x + zdist*vrotatex.y
+                    roz     = y*-vrotatex.y + zdist*vrotatex.x
+                    top     = iif(roz < 0.0001, SCREEN_Y, int(SCREEN_Y*roy/roz+HALF_Y))
+                'else
+                '    doFloor = 0
+                'end if
                 
-                'dim zdist as double
-                'zdist = (dist/PREC)/Game.forward.z
-                'top -= (HEIGHT_RATIO/(dist*dz*abs(1-Game.forward.z)))
+                'if ch >= tz and ch <= bz then '// should only need to be h > tz
+                    y       = pz-ch+strafeValue
+                    roy     = y* vrotatex.x + zdist*vrotatex.y
+                    roz     = y*-vrotatex.y + zdist*vrotatex.x
+                    cbottom = iif(roz < 0.0001, -1, int(SCREEN_Y*roy/roz+HALF_Y))
+                'else
+                '    doCeil  = 0
+                'end if
+                
+                zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
                 
                 dc = 0
                 if cbottom >= bottom then cbottom = bottom
                 if top <= ctop then top = ctop
                 if cbottom >= ctop then
-                    colr = tileColors(cell->getCeilTile())
+                    colr = tileColors(bcell->getCeilTile())
                     if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
                     if colr <> &hff00ff then
                         if dc = 0 then
@@ -1174,14 +1735,14 @@ sub main()
                 end if
                 if top <= bottom then
                 
-                    colr = tileColors(cell->getFloorTile())
-                    colr = rgbAdd(colr, cell->getNormal())
+                    colr = tileColors(tcell->getFloorTile())
+                    colr = rgbAdd(colr, tcell->getNormal())
                     
                     dc = (dist shr PREC_SHIFT)*atmosphereFactor
                     dc = dc*dc*dc
                     dc1 = 1/(dc+1)
                     skyR  = (colorSky  shr 16) and 255: skyG  = (colorSky  shr 8) and 255: skyB  = (colorSky  and 255)
-                    if cell->hasFlag( CellFlags.water ) then
+                    if tcell->hasFlag( CellFlags.water ) then
                         dim add as integer
                         add = 7-(int(((cos(lx+seconds*0.002)*TO_RAD)*(sin(seconds*0.002-ly)*TO_RAD)*3000000)) and 15)
                         r = &h5c+add: g = &h53+add: b = &hdb+add
@@ -1206,63 +1767,117 @@ sub main()
                     bottom = top-1
                 end if
                 
-                if (dist > nextDist) then
-                    switchCount += 1
-                    select case switchCount
-                    case 1
-                        map = @medres
-                        nextDist = 320*PREC'160'320'64'320
-                    case 2
-                        map = @lowres
-                        nextDist = 480*PREC'320'480'256'480
-                    case 3
-                        map = @subres
-                        nextDist = &h7fffffff
-                    end select
-                    xAlign = 1: yAlign = 1
-                    x_dx \= 2: x_dy \= 2
-                    y_dx \= 2: y_dy \= 2
-                    x_di *= 2: y_di *= 2
-                    lx   \= 2: ly   \= 2
-                    if x_dx-((x_dx shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
-                        x_dx  += x_ax\2: x_dy += x_ay\2
-                        xDist += x_di\2
-                    end if
-                    if y_dy-((y_dy shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
-                        y_dy  += y_ay\2: y_dx += y_ax\2
-                        yDist += y_di\2
-                    end if
-                    
-                     if xDist < yDist then
-                        dx = x_dx: dy = x_dy
-                        ex = x_ex: ey = x_ey
-                        dist = xDist
-                    else
-                        dy = y_dy: dx = y_dx
-                        ey = y_ey: ex = y_ex
-                        dist = yDist
-                    end if
-                end if
+                'if (dist > nextDist) then
+                '    switchCount += 1
+                '    select case switchCount
+                '    case 1
+                '        map = @medres
+                '        nextDist = 320*PREC'160'320'64'320
+                '    case 2
+                '        map = @lowres
+                '        nextDist = 480*PREC'320'480'256'480
+                '    case 3
+                '        map = @subres
+                '        nextDist = &h7fffffff
+                '    end select
+                '    xAlign = 1: yAlign = 1
+                '    x_tx  \= 2: x_ty  \= 2: x_tz  \= 2
+                '    x_bx  \= 2: x_by  \= 2: x_bz  \= 2
+                '    y_tx  \= 2: y_ty  \= 2: y_tz  \= 2
+                '    y_bx  \= 2: y_by  \= 2: y_bz  \= 2
+                '    x_tdi *= 2: y_tdi *= 2
+                '    x_bdi *= 2: y_bdi *= 2
+                '    tmx   \= 2: tmy   \= 2
+                '    bmx   \= 2: bmy   \= 2
+                '    if x_tx-((x_tx shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
+                '        x_tx   += x_atx\2: x_ty += x_aty\2: x_tz += x_atz\2
+                '        xtDist += x_tdi\2
+                '    end if
+                '    if x_bx-((x_bx shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
+                '        x_bx   += x_abx\2: x_by += x_aby\2: x_bz += x_abz\2
+                '        xbDist += x_bdi\2
+                '    end if
+                '    if y_ty-((y_ty shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
+                '        y_ty   += y_aty\2: y_tx += y_atx\2: y_tz += y_atz\2
+                '        ytDist += y_tdi\2
+                '    end if
+                '    if y_by-((y_by shr PREC_SHIFT) shl PREC_SHIFT) <> 0 then
+                '        y_by   += y_aby\2: y_bx += y_abx\2: y_bz += y_abz\2
+                '        ybDist += y_bdi\2
+                '    end if
+                '    
+                '    if xtDist < ytDist then
+                '        tx  =  x_tx: ty  = x_ty: tz = x_tz
+                '        etx = x_etx: ety = x_ety
+                '        tdist = xtDist
+                '    else
+                '        tx  =  y_tx: ty  = y_ty: tz = y_tz
+                '        etx = y_etx: ety = y_ety
+                '        tdist = ytDist
+                '    end if
+                '    
+                '    if xbDist < ybDist then
+                '        bx  =  x_bx: by  = x_by: bz = x_bz
+                '        ebx = x_ebx: eby = x_eby
+                '        bdist = xbDist
+                '    else
+                '        bx  =  y_bx: by  = y_by: bz = y_bz
+                '        ebx = y_ebx: eby = y_eby
+                '        bdist = ybDist
+                '    end if
+                '    
+                'end if
                 
                 '// draw side
-                lx = (dx shr PREC_SHIFT)+ex: ly = (dy shr PREC_SHIFT)+ey
-                cell = map->getCell(lx, ly)
-                h = cell->getFloorHeight()*0.01
-                ch = cell->getCeilHeight()*0.01
-                top = midline+int(sliceSize*((ph-h)+strafeValue))+1
                 
-                'top -= (HEIGHT_RATIO/(dist*dz*abs(1-Game.forward.z)))
+                tmx = (tx shr PREC_SHIFT)+etx: tmy = (ty shr PREC_SHIFT)+ety
+                bmx = (bx shr PREC_SHIFT)+ebx: bmy = (by shr PREC_SHIFT)+eby
                 
-                cbottom = midline+int(sliceSize*((ph-ch)+strafeValue))+1
+                tcell = map->getCell(tmx, tmy)
+                h     = tcell->getFloorHeight()*0.01
+                ch    = tcell->getCeilHeight()*0.01
+                
+                doFloor = 1
+                doCeil  = 1
+                
+                'if h >= tz and h <= bz then '// should only need to be h < bz
+                    y       = pz-h+strafeValue
+                    roy     = y* vrotatex.x + zdist*vrotatex.y
+                    roz     = y*-vrotatex.y + zdist*vrotatex.x
+                    top     = iif(roz < 0.0001, SCREEN_Y, int(SCREEN_Y*roy/roz+HALF_Y))
+                'else
+                '    doFloor = 0
+                'end if
+            
+                if (tmx <> bmx) or (tmy <> bmy) then '// then rays have split, need to do another ceil/floor/side-ceil/side-floor calculation for second ray
+                    bcell = map->getCell(bmx, bmy)
+                    h     = bcell->getFloorHeight()*0.01
+                    ch    = bcell->getCeilHeight()*0.01
+                else
+                    bcell = tcell
+                end if
+                
+                'if ch >= tz and ch <= bz then '// should only need to be h > tz
+                    y       = pz-ch+strafeValue
+                    roy     = y* vrotatex.x + zdist*vrotatex.y
+                    roz     = y*-vrotatex.y + zdist*vrotatex.x
+                    cbottom = iif(roz < 0.0001, -1, int(SCREEN_Y*roy/roz+HALF_Y))
+                'else
+                '    doCeil  = 0
+                'end if
+
+                
+                zBufferValue =  (((dist shr PREC_SHIFT)\4) and 255) shl 24
+                
                 if cbottom >= bottom then cbottom = bottom
                 if top <= ctop then top = ctop
                 if cbottom >= ctop then
-                    colr = tileColors(cell->getCeilTile())
+                    colr = tileColors(tcell->getCeilTile())
                     if cbottom >= SCREEN_Y then cbottom = SCREEN_Y-1
                     if colr <> &hff00ff then
-                        if cell->hasFlag( CellFlags.clouds ) then
+                        if tcell->hasFlag( CellFlags.clouds ) then
                             'colr = rgbAdd(colr, map->normals(lx, ly)+iif(xDist > yDist, 10, -10))
-                            colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
+                            colr = rgbAdd(colr, iif(xtDist > ytDist, 10, -10))
                         end if
                         'if dc = 0 then
                             dc = (dist shr PREC_SHIFT)*atmosphereFactor
@@ -1280,9 +1895,9 @@ sub main()
                     ctop = cbottom+1
                 end if
                 if top <= bottom then
-                    colr = tileColors(cell->getFloorTile())
-                    colr = rgbAdd(colr, cell->getNormal())
-                    colr = rgbAdd(colr, iif(xDist > yDist, 10, -10))
+                    colr = tileColors(bcell->getFloorTile())
+                    colr = rgbAdd(colr, bcell->getNormal())
+                    colr = rgbAdd(colr, iif(xbDist > ybDist, 10, -10))
                     'if dc = 0 then
                         dc = (dist shr PREC_SHIFT)*atmosphereFactor
                         dc = dc*dc*dc
@@ -1315,9 +1930,9 @@ sub main()
                 
                 if bottom < 0 then exit do
                 if ctop >= SCREEN_Y then exit do
+                if ctop >= bottom then exit do
                 
             loop
-            
             
             'end
             '// draw sky
@@ -1344,15 +1959,17 @@ sub main()
                 'while yPix >= top: *(pixelNow) = colr: pixelNow -= pitch: yPix -=1: wend
             end if
             
-            vray.x += vr.x: vray.y += vr.y
-            vps.x  += vpr.x: vps.y += vpr.y
+            vraytop += vr
+            vraybtm += vr
+            
+            'vray.x += vr.x: vray.y += vr.y
+            'vps.x  += vpr.x: vps.y += vpr.y
+            
             'if f = HALF_X then
             '    game_font.writeText( "MAX: "+str(int(dist)), 3, 12 )
             'end if
             
-            px = savePx: py = savePy
-            
-            if bottom >= ctop then exit do
+            'px = savePx: py = savePy
             
         next f
         
@@ -1366,13 +1983,24 @@ sub main()
             dim v4 as Vector3
             dim vCenter as Vector
             dim showNormals as integer
+            dim vc as Vector, dot as double
             
             showNormals = 0
             
             vCenter = Vector(0, 0, 0)
             
             SDL_SetRenderDrawColor(gfxRenderer, &hff, 0, 0, 0)
+            dim mc as integer
+            mc = 0
             for i = 0 to meshCount-1
+                if i > 0 then
+                    dim pv as Vector = Vector(meshPositions(i).x-Game.position.x, 0, meshPositions(i).y-Game.position.y)
+                    dim fv as Vector = vectorUnit(Vector(Game.forward.x, 0, Game.forward.y))
+                    dot = vectorDot(fv, vectorUnit(pv)): if dot < 0 then continue for
+                end if
+                '- idea -- low-poly meshes for ones further out
+                mc += 1
+                
                 m.copy(@meshes(i))
                 if i > 0 then
                     m.rotateY((seconds*120) mod 360)
@@ -1380,13 +2008,13 @@ sub main()
                     m.rotateY(-pa)
                 else
                     m.rotateY(180)
-                    m.rotateX(Easing.quad_easein(fireTimer*2)*10)
+                    m.rotateX(-Easing.quad_easein(fireTimer*2)*10)
                     m.rotateX(-90)
                     m.rotateX(90)
                     if fireTimer = 0 then
-                        m.translate(2-strafeValue*70, -2-abs(strafeValue*50), 5-strafeValue*20-Easing.quad_easein(fireTimer*2)*3)
+                        m.translate(2-strafeValue*70, -2-abs(strafeValue*50), 5-strafeValue*20)
                     else
-                        m.translate(2, -2, 5-Easing.quad_easein(fireTimer*2)*9)
+                        m.translate(2, -2, 5-Easing.quad_easein(fireTimer*2)*3)
                     end if
                 end if
                 m.sort()
@@ -1398,7 +2026,6 @@ sub main()
                     if mp = 0 then exit do
                     
                     v3 = mp->copy()
-                    dim vc as Vector, dot as double
                     
                     if i = 0 then
                         vc = v3.v(3)
@@ -1420,9 +2047,9 @@ sub main()
                         
                         if (v3.v(0).z > 0) and (v3.v(1).z > 0) and (v3.v(2).z > 0) then
                             dim z as integer
-                            z = ((cast(integer, v3.v(0).z)-abs(dz))\(4*2.2222)) and 255 ' do mesh positions - player (should already be this?)
-                            v3.make2d(SCREEN_X, SCREEN_Y, 2.2222, 2.2222)
-                            if i > 0 then v3.translate(0, midline-HALF_Y, 0)
+                            z = (int((v3.v(0).z))\4) and 255 ' do mesh positions - player (should already be this?)
+                            v3.make2d(SCREEN_X, SCREEN_Y, SCREEN_Y)
+                            if i > 0 then v3.translate(0, mdn-HALF_Y, 0)
                             'fx = v3.v(0).x: fy = v3.v(0).y
                             'ix = cast(integer, fx): iy = cast(integer, fy)
                             'if ix >= 0 and ix < SCREEN_X and iy >= 0 and iy < SCREEN_Y then
@@ -1444,19 +2071,18 @@ sub main()
                                 '*pixelNow = rgb(255, 0, 255)
                             'end if
                             if i = 0 then
-                                cell = highres.getCell(int(px), int(py))
-                                dc = tileColors(cell->getCeilTile()) '// SHOULD BE RGBADD!!!
+                                'cell = 0' highres.getCell(int(px), int(py))
+                                dc = 0'tileColors(cell->getCeilTile()) '// SHOULD BE RGBADD!!!
                                 dc += iif(dc < 96, (96-25)+fireTimer*25, fireTimer*25)
                                 r = &hff+dot*50
                                 g = &he4+dot*50
                                 b = &hd8+dot*50
-                                z = 0
+                                z = -1
                             else
                                 r = &hff+dot*30
                                 g = &he4+dot*30
                                 b = &hd8+dot*30
                             end if
-                            z = 0
                             if r > 255 then r = 255
                             if g > 255 then g = 255
                             if b > 255 then b = 255
@@ -1469,7 +2095,7 @@ sub main()
                             drawTriangle(v3.v(0).x, v3.v(0).y, v3.v(1).x, v3.v(1).y, v3.v(2).x, v3.v(2).y, z, colr, pixels, pitch)
                             
                             if showNormals then
-                                v4.make2d(SCREEN_X, SCREEN_Y, 2.25, 2.25)
+                                v4.make2d(SCREEN_X, SCREEN_Y, SCREEN_Y)
                                 if i > 0 then v4.translate(0, midline-HALF_Y, 0)
                                 drawLine(v4.v(0).x, v4.v(0).y, v4.v(1).x, v4.v(1).y, &hff0000, pixels, pitch)
                             end if
@@ -1486,6 +2112,9 @@ sub main()
                 loop
             next i
             
+            centerDist = cast(ubyte, *(pixels+HALF_Y*pitch+HALF_X-1) shr 24)
+            
+            dartRenderCount = 0
             darts.cycle(delta)
             mobs.cycle(delta)
         
@@ -1498,6 +2127,17 @@ sub main()
         game_font.writeText( "FPS: "+str(fps), 3, 3 )
         game_font.writeText( "X: "+str(cast(single, px)), 3, 15 )
         game_font.writeText( "Y: "+str(cast(single, py)), 3, 27 )
+        game_font.writeText( "Z: "+str(cast(single, pz)), 3, 39 )
+        game_font.writeText( "AX: "+str(cast(single, Game.angleX)), 3, 51 )
+        game_font.writeText( "AY: "+str(cast(single, Game.angleY)), 3, 63 )
+        game_font.writeText( "AZ: "+str(cast(single, Game.angleZ))+", "+str(cast(single, dAngleZ)), 3, 75 )
+        game_font.writeText( "VX: "+str(cast(single, Game.forward.x)), 3, 87  )
+        game_font.writeText( "VY: "+str(cast(single, Game.forward.y)), 3, 99  )
+        game_font.writeText( "VZ: "+str(cast(single, Game.forward.z)), 3, 111 )
+        'game_font.writeText( "MSH: "+str(mc), 3, 123 )
+        'game_font.writeText( "DRT: "+str(darts.getCount()), 3, 51 )
+        'game_font.writeText( "DRC: "+str(dartRenderCount), 3, 63 )
+        'game_font.writeText( "DST: "+str(cast(single, centerDist)), 3, 123 )
         if 0 then
         game_font.writeText( "FPS: "+str(fps), 3, 3 )
         game_font.writeText( "X: "+str(cast(single, px)), 3, 15 )
@@ -1543,16 +2183,35 @@ sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
     if y1 > y2 then swap y1, y2: swap x1, x2
     if y0 > y1 then swap y0, y1: swap x0, x1
     
-    dx = x1-x0: dy = y1-y0: vx0 = iif(dx <> 0, dx, 0.00000001)/dy
-    dx = x2-x0: dy = y2-y0: vx1 = iif(dx <> 0, dx, 0.00000001)/dy
+    dx = iif(x1-x0 <> 0, x1-x0, 0.0001): dy = iif(y1-y0 <> 0, y1-y0, 0.0001): vx0 = dx/dy
+    
+    if x0 < 0 then y0 = y0-(dy/dx)*x0: x0 = 0
+    if x0 >= SCREEN_X then y0 = y0+(dy/dx)*(SCREEN_X-x0): x0 = SCREEN_X-1
+    if y0 < 0 then x0 = x0-(dx/dy)*y0: y0 = 0
+    if y0 >= SCREEN_Y then x0 = x0+(dx/dy)*(SCREEN_Y-y0): y0 = SCREEN_Y-1
+    if x1 < 0 then y1 = y1-(dy/dx)*x1: x1 = 0
+    if x1 >= SCREEN_X then y1 = y1+(dy/dx)*(SCREEN_X-x1): x1 = SCREEN_X-1
+    if y1 < 0 then x1 = x1-(dx/dy)*y1: y1 = 0
+    if y1 >= SCREEN_Y then x1 = x1+(dx/dy)*(SCREEN_Y-y1): y1 = SCREEN_Y-1
+    
+    dx = iif(x2-x0 <> 0, x2-x0, 0.0001): dy = iif(y2-y0 <> 0, y2-y0, 0.0001): vx1 = dx/dy
+    
+    if x2 < 0 then y2 = y2-(dy/dx)*x2: x2 = 0
+    if x2 >= SCREEN_X then y2 = y2+(dy/dx)*(SCREEN_X-x2): x2 = SCREEN_X-1
+    if y2 < 0 then x2 = x2-(dx/dy)*y2: y2 = 0
+    if y2 >= SCREEN_Y then x2 = x2+(dx/dy)*(SCREEN_Y-y2): y2 = SCREEN_Y-1
+    
+    dx = iif(x1-x0 <> 0, x1-x0, 0.0001): dy = iif(y1-y0 <> 0, y1-y0, 0.0001): vx0 = dx/dy
+    dx = iif(x2-x0 <> 0, x2-x0, 0.0001): dy = iif(y2-y0 <> 0, y2-y0, 0.0001): vx1 = dx/dy
     
     sx0 = x0+0.5: sy0 = y0+0.5
     sx1 = x0+0.5: sy1 = y0+0.5
+    
 	dim i as integer
     dim n as integer
     dim l as integer
 	for i = y0 to y1
-		l = int(abs(int(sx1)-int(sx0)))
+		l = int(abs(int(sx1)-int(sx0)))'+1
         n = 0
         x = int(iif(sx0 < sx1, sx0, sx1))
         y = int(iif(sx0 < sx1, sy0, sy1))
@@ -1569,13 +2228,21 @@ sub drawTriangleTop(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
             l += (SCREEN_X-(x+l))
         end if
         pixelNow = pixels+x+y*pitch
-        while n <= l
-            if (*(pixelNow) shr 24) > z then
+        if z > -1 then
+            while n <= l
+                if (*(pixelNow) shr 24) >= z then
+                    *(pixelNow) = colr
+                end if
+                pixelNow += 1
+                n += 1
+            wend
+        else
+            while n <= l
                 *(pixelNow) = colr
-            end if
-            pixelNow += 1
-            n += 1
-        wend
+                pixelNow += 1
+                n += 1
+            wend
+        end if
 	next i
 
 end sub
@@ -1597,16 +2264,35 @@ sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
     if y1 > y2 then swap y1, y2: swap x1, x2
     if y0 > y1 then swap y0, y1: swap x0, x1
     
-    dx = x2-x0: dy = y2-y0: vx0 = iif(dx <> 0, dx, 0.00000001)/dy
-    dx = x2-x1: dy = y2-y1: vx1 = iif(dx <> 0, dx, 0.00000001)/dy
+    dx = iif(x2-x0 <> 0, x2-x0, 0.0001): dy = iif(y2-y0 <> 0, y2-y0, 0.0001): vx0 = dx/dy
+    
+    if x0 < 0 then y0 = y0-(dy/dx)*x0: x0 = 0
+    if x0 >= SCREEN_X then y0 = y0+(dy/dx)*(SCREEN_X-x0): x0 = SCREEN_X-1
+    if y0 < 0 then x0 = x0-(dx/dy)*y0: y0 = 0
+    if y0 >= SCREEN_Y then x0 = x0+(dx/dy)*(SCREEN_Y-y0): y0 = SCREEN_Y-1
+    if x2 < 0 then y2 = y2-(dy/dx)*x2: x2 = 0
+    if x2 >= SCREEN_X then y2 = y2+(dy/dx)*(SCREEN_X-x2): x2 = SCREEN_X-1
+    if y2 < 0 then x2 = x2-(dx/dy)*y2: y2 = 0
+    if y2 >= SCREEN_Y then x2 = x2+(dx/dy)*(SCREEN_Y-y2): y2 = SCREEN_Y-1
+    
+    dx = iif(x2-x1 <> 0, x2-x1, 0.0001): dy = iif(y2-y1 <> 0, y2-y1, 0.0001): vx1 = dx/dy
+    
+    if x1 < 0 then y1 = y1-(dy/dx)*x1: x1 = 0
+    if x1 >= SCREEN_X then y1 = y1+(dy/dx)*(SCREEN_X-x1): x1 = SCREEN_X-1
+    if y1 < 0 then x1 = x1-(dx/dy)*y1: y1 = 0
+    if y1 >= SCREEN_Y then x1 = x1+(dx/dy)*(SCREEN_Y-y1): y1 = SCREEN_Y-1
+    
+    dx = iif(x2-x0 <> 0, x2-x0, 0.0001): dy = iif(y2-y0 <> 0, y2-y0, 0.0001): vx0 = dx/dy
+    dx = iif(x2-x1 <> 0, x2-x1, 0.0001): dy = iif(y2-y1 <> 0, y2-y1, 0.0001): vx1 = dx/dy
     
     sx0 = x0+0.5: sy0 = y0+0.5
     sx1 = x1+0.5: sy1 = y1+0.5
+    
 	dim i as integer
     dim n as integer
     dim l as integer
 	for i = y0 to y2
-		l = int(abs(int(sx1)-int(sx0)))
+		l = int(abs(int(sx1)-int(sx0)))'+1
         n = 0
         x = int(iif(sx0 < sx1, sx0, sx1))
         y = int(iif(sx0 < sx1, sy0, sy1))
@@ -1623,17 +2309,28 @@ sub drawTriangleBtm(x0 as integer, y0 as integer, x1 as integer, y1 as integer, 
             l += (SCREEN_X-(x+l))
         end if
         pixelNow = pixels+x+y*pitch
-        while n <= l
-            if (*(pixelNow) shr 24) > z then
+        if z > -1 then
+            while n <= l
+                if (*(pixelNow) shr 24) >= z then
+                    *(pixelNow) = colr
+                end if
+                pixelNow += 1
+                n += 1
+            wend
+        else
+            while n <= l
                 *(pixelNow) = colr
-            end if
-            pixelNow += 1
-            n += 1
-        wend
+                pixelNow += 1
+                n += 1
+            wend
+        end if
 	next i
 
 end sub
 
+'// drawTriangleFast()    -- for triangles that don't need to be clipped -- discard any that have points out-of-bounds
+'// drawTriangleMed()     -- for triangles that are further out -- can be clipped with lower precision
+'// drawTrianglePerfect() -- for triangles that are really close to z=0 and need to be clipped nicely
 sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 as integer, y2 as integer, z as integer, colr as integer, pixels as integer ptr, pitch as integer)
 
     dim mx as integer, my as integer
@@ -1643,10 +2340,7 @@ sub drawTriangle(x0 as integer, y0 as integer, x1 as integer, y1 as integer, x2 
     if (x0 >= SCREEN_X) and (x1 >= SCREEN_X) and (x2 >= SCREEN_X) then return
     if (y0 >= SCREEN_Y) and (y1 >= SCREEN_Y) and (y2 >= SCREEN_Y) then return
     
-    'drawLine(x0, y0, x1, y1, colr, pixels, pitch)
-    'drawLine(x1, y1, x2, y2, colr, pixels, pitch)
-    'drawLine(x2, y2, x0, y0, colr, pixels, pitch)
-    'return
+    '// add clip line method here -- clip the three lines
     
     if y0 > y1 then swap y0, y1: swap x0, x1
     if y0 > y2 then swap y0, y2: swap x0, x2
@@ -1683,8 +2377,8 @@ sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, colr as
     dx = x1-x0
 	dy = y1-y0
     
-    if dx = 0 then dx = 0.00000001
-    if dy = 0 then dy = 0.00000001
+    if dx = 0 then dx = 0.0001
+    if dy = 0 then dy = 0.0001
 	
 	vm = sqr(dx*dx+dy*dy)
 	vx = dx / vm
@@ -1702,8 +2396,8 @@ sub drawLine(x0 as integer, y0 as integer, x1 as integer, y1 as integer, colr as
     dx = x1-x0
 	dy = y1-y0
     
-    if dx = 0 then dx = 0.00000001
-    if dy = 0 then dy = 0.00000001
+    if dx = 0 then dx = 0.0001
+    if dy = 0 then dy = 0.0001
     
     vm = sqr(dx*dx+dy*dy)
 	vx = dx / vm
@@ -1805,8 +2499,8 @@ sub fractalDrill(startX as double, startY as double, startZ as integer = 0, u as
         xborder1 = iif(size > 50, x+size*0.01, x)
         for yy = yborder0 to yborder1 step 1
             for xx = xborder0 to xborder1
-                l = (150-xx)*(150-xx)*0.0005
-                if not (xx > 150 and yy > 150 and xx < highres.getWidth()-150 and yy < highres.getHeight()-150) then
+                l = (75-xx)*(75-xx)*0.0005
+                if not (xx > 75) then
                     cell = highres.getCell(xx, yy)
                     if cell = 0 then continue for
                     if ((cell->getFloorHeight() = 0) and (cell->getCeilHeight() = 0))_
@@ -1850,12 +2544,12 @@ sub fractalDrill(startX as double, startY as double, startZ as integer = 0, u as
     x -= v.x
     y -= v.y
     
-    if x > 150 and v.x > 0 then
-        x = 150
+    if x > 75 and v.x > 0 then
+        x = 75
         v.x = -v.x
     end if
     
-    if rndint(0, 4) = 0 and x < 140 then
+    if rndint(0, 4) = 0 and x < 65 then
         size = iif(rndint(0,1)=0, 1, 2)
         for yy = y-size to y+size
             for xx = x-size to x+size
@@ -1928,7 +2622,7 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     for y = 0 to highres.getHeight()-1
         for x = 0 to highres.getWidth()-1
             cell = highres.getCell(x, y)
-            if x > 150 and y > 150 and x < highres.getWidth()-150 and y < highres.getHeight()-150 then
+            if x > 75 then
                 cell->setCeilHeight( 5000-(abs(sin(x*TO_RAD)-cos(y*TO_RAD))*500) )
                 r = int(fractalSomething(x*x+y)*1) and 15'((x xor y) and 7)
                 cell->setCeilTile( addTileColor(rgb(&hee+r, &hee+r, &hee+r)) )
@@ -1969,46 +2663,13 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
                 cell->setCeilHeight( 0 )
                 cell->setFloorHeight( 0 )
                 r = int(16*rnd(1))-32
-                cell->setCeilTile( addTileColor( rgbMix(rgbAdd(colorWall, r), &h000000, 1.0, (150-x)*(150-x)*0.01)) )
-                cell->setFloorTile( addTileColor( rgbMix(rgbAdd(colorWall, r), &h000000, 1.0, (150-x)*(150-x)*0.01)) )
+                cell->setCeilTile( addTileColor( rgbMix(rgbAdd(colorWall, r), &h000000, 1.0, (75-x)*(75-x)*0.01)) )
+                cell->setFloorTile( addTileColor( rgbMix(rgbAdd(colorWall, r), &h000000, 1.0, (75-x)*(75-x)*0.01)) )
             end if
         next x
         if (y and 511) = 0 then print ".";
     next y
-    for i = 0 to 30
-        y = 1024*rnd(1)
-        fractalDrill(150, y, highres.getCell(151, y)->getFloorHeight()+100*rnd(1), Vector(-10, 0, 0), 30)
-    next i
-    dim dx as integer
-    dim dy as integer
-    dim dist as double
-    dim lightColor as integer
-    for i = 0 to 150
-        dx = rndint(80, 130)
-        dy = rndint(150, 1024-150)
-        lightColor = rndint(1, 10)
-        if lightColor < 5 then
-            lightColor = &hffff99
-        elseif lightColor < 9 then
-            lightColor = &hcc3333
-        elseif lightColor = 9 then
-            lightColor = &h55ff55
-        else
-            lightColor = &h5577ff
-        end if
-        for y = dy-3 to dy+3
-            for x = dx-3 to dx+3
-                cell = highres.getCell(x, y)
-                dist = sqr((x-dx)*(x-dx)+(y-dy)*(y-dy)) 'iif(abs(x-dx) > abs(y-dy), abs(x-dx), abs(y-dy))+1
-                if dist <= 3 then
-                    dist *= 3
-                    if dist < 0.8 then dist = 0.8
-                    cell->setFloorTile( addTileColor( rgbMix(tileColors(cell->getFloorTile()), lightColor, dist, 1.0)) )
-                    cell->setCeilTile( addTileColor( rgbMix(tileColors(cell->getFloorTile()), lightColor, dist, 1.0)) )
-                end if
-            next x
-        next y
-    next i
+    
     dim c as string
     'dim h as integer
     dim low_h as integer
@@ -2020,31 +2681,40 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     print ".";
     
     '// mountains
-    'dx = int(highres.w*rnd(1))
-    'dy = int(highres.h*rnd(1))
-    'for y = dy-500 to dy+500
-    'for x = dx-500 to dx+500
-    '    if highres.heights(x, y) > 0 then
-    '        highres.setWall(x, y, 0)
-    '        highres.setHeight(x, y, _
-    '          ((sin((int(y) * int(x))*0.01*TO_RAD))*600_
-    '        ))
-    '        'if highres.heights(x, y) < -100 then
-    '        '    highres.setHeight(x, y, -100)
-    '        '    'highres.setColor(x, y, rgb(&h8e-50, &h92-20, &hbf-20))
-    '        '    r = int(16*rnd(1))-32
-    '        '    highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
-    '        '    highres.setData(x, y, 0, 777)
-    '        'else
-    '            r = int(16*rnd(1))-32
-    '            highres.setColor(x, y, rgb(&hd2+r, &hd2+r, &hd2+r))
-    '            highres.setData(x, y, 0, 0)
-    '        'end if
-    '    end if
-    'next x
-    'next y
+    dim dx as integer
+    dim dy as integer
+    if 0 then
+    dx = 75+int((highres.getWidth()-75)*rnd(1))
+    dy = int(highres.getHeight()*rnd(1))
+    for y = dy-500 to dy+500
+    for x = dx-500 to dx+500
+        cell = highres.getCell(x, y)
+        if cell <> 0 then
+            'cell->setFloorHeight(_
+            '  ((sin((int(y) * int(x))*0.01*TO_RAD))*600_
+            '))
+            cell->setFloorHeight( cell->getFloorHeight()+((sin((int(y) * int(x))*0.01*TO_RAD))*600 ) )
+            r = int(16*rnd(1))-32
+            cell->setFloorTile( addTileColor(rgbAdd(colorFloor, r)) )
+            cell->clearFlags()
+            'if highres.heights(x, y) < -100 then
+            '    highres.setHeight(x, y, -100)
+            '    'highres.setColor(x, y, rgb(&h8e-50, &h92-20, &hbf-20))
+            '    r = int(16*rnd(1))-32
+            '    highres.setColor(x, y, rgb(&h8d+r, &hb2+r, &h7c+r))
+            '    highres.setData(x, y, 0, 777)
+            'else
+            '    r = int(16*rnd(1))-32
+            '    cell->setFloorTile( addTileColor(rgb(&hd2+r, &hd2+r, &hd2+r)) )
+            '    cell->clearFlags()
+            'end if
+        end if
+    next x
+    next y
     
     print ".";
+    
+    end if
     
     '// desert
     'dx = int(highres.w*rnd(1))
@@ -2077,48 +2747,89 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     print ".";
     
     '// snow caps
-    'dx = int(highres.w*rnd(1))
-    'dy = int(highres.h*rnd(1))
-    'for y = dy-200 to dy+200
-    'for x = dx-200 to dx+200
-    '    if highres.heights(x, y) > 0 then
-    '        colr = highres.colors(x, y)
-    '        r = (colr shr 16) and &hff: g = (colr shr 8) and &hff: b = (colr and &hff)
-    '        r += highres.heights(x, y)*0.001+128
-    '        g += highres.heights(x, y)*0.001+128
-    '        b += highres.heights(x, y)*0.001+128
-    '        if r > 255 then r = 255
-    '        if g > 255 then g = 255
-    '        if b > 255 then b = 255
-    '        chance = -int(16*rnd(1))
-    '        highres.setColor(x, y, rgb(r+chance, g+chance, b+chance))
-    '        highres.setData(x, y, 0, 0)
-    '    end if
-    'next x
-    'next y
+    dx = int(highres.getWidth()*rnd(1))
+    dy = int(highres.getHeight()*rnd(1))
+    for y = dy-200 to dy+200
+    for x = dx-200 to dx+200
+        cell = highres.getCell(x, y)
+        if cell <> 0 then
+            if cell->getFloorHeight() > 2500 then
+                colr = tileColors(cell->getFloorTile())
+                r = (colr shr 16) and &hff: g = (colr shr 8) and &hff: b = (colr and &hff)
+                r += cell->getFloorHeight()*0.001+128
+                g += cell->getFloorHeight()*0.001+128
+                b += cell->getFloorHeight()*0.001+128
+                if r > 255 then r = 255
+                if g > 255 then g = 255
+                if b > 255 then b = 255
+                chance = -int(16*rnd(1))
+                cell->setFloorTile( addTileColor(rgb(r+chance, g+chance, b+chance)) )
+                cell->clearFlags()
+            end if
+        end if
+    next x
+    next y
     
     print ".";
     
     '// swamp
-    'dx = int((highres.w-400)*rnd(1))+200
-    'dy = int((highres.h-400)*rnd(1))+200
-    'for y = dy-200 to dy+200
-    '    for x = dx-200 to dx+200
-    '        highres.setHeight(x, y, highres.heights(x, y)/5)
-    '        r = int(16*rnd(1))-32
-    '        highres.setColor(x, y, rgb(&h7d+r, &h92+r, &h6c+r))
-    '        highres.setData(x, y, 0, 0)
-    '    next x
-    'next y
-    'for y = dy-180 to dy+180
-    '    for x = dx-180 to dx+180
-    '        if int(32*rnd(1)) = 1 then
-    '            highres.setHeight(x, y, highres.heights(x, y)+60+int(rnd(1)*1))
-    '            highres.setColor(x, y, rgb(&h9d+r, &h92+r, &h5c+r))
-    '            highres.setData(x, y, 0, 0)
-    '        end if
-    '    next x
-    'next y
+    dx = int((highres.getWidth()-400)*rnd(1))+200
+    dy = int((highres.getHeight()-400)*rnd(1))+200
+    for y = dy-200 to dy+200
+        for x = dx-200 to dx+200
+            cell = highres.getCell(x, y)
+            cell->setFloorHeight( cell->getFloorHeight()/5 )
+            r = int(16*rnd(1))-32
+            cell->setFloorTile( addTileColor(rgb(&h7d+r, &h92+r, &h6c+r)) )
+            cell->clearFlags()
+        next x
+    next y
+    for y = dy-180 to dy+180
+        for x = dx-180 to dx+180
+            if int(32*rnd(1)) = 1 then
+                cell = highres.getCell(x, y)
+                cell->setFloorHeight( cell->getFloorHeight()+60+int(rnd(1)*1) )
+                cell->setFloorTile( addTileColor(rgb(&h9d+r, &h92+r, &h5c+r)) )
+                cell->clearFlags()
+            end if
+        next x
+    next y
+    
+    print ".";
+    
+    for i = 0 to 30
+        y = MAP_HEIGHT*rnd(1)
+        fractalDrill(75, y, highres.getCell(76, y)->getFloorHeight()+100*rnd(1), Vector(-10, 0, 0), 30)
+    next i
+    
+    dim dist as double
+    dim lightColor as integer
+    for i = 0 to 150
+        dx = rndint(5, 55)
+        dy = rndint(5, MAP_HEIGHT-5)
+        lightColor = rndint(1, 10)
+        if lightColor < 5 then
+            lightColor = &hffff99
+        elseif lightColor < 9 then
+            lightColor = &hcc3333
+        elseif lightColor = 9 then
+            lightColor = &h55ff55
+        else
+            lightColor = &h5577ff
+        end if
+        for y = dy-3 to dy+3
+            for x = dx-3 to dx+3
+                cell = highres.getCell(x, y)
+                dist = sqr((x-dx)*(x-dx)+(y-dy)*(y-dy)) 'iif(abs(x-dx) > abs(y-dy), abs(x-dx), abs(y-dy))+1
+                if dist <= 3 then
+                    dist *= 3
+                    if dist < 0.8 then dist = 0.8
+                    cell->setFloorTile( addTileColor( rgbMix(tileColors(cell->getFloorTile()), lightColor, dist, 1.0)) )
+                    cell->setCeilTile( addTileColor( rgbMix(tileColors(cell->getFloorTile()), lightColor, dist, 1.0)) )
+                end if
+            next x
+        next y
+    next i
     
     print ".";
     
@@ -2176,6 +2887,23 @@ sub loadMap(highres as FlatMap, medres as FlatMap, lowres as FlatMap)
     next i
     
     print ".";
+    
+    dim rx as integer
+    dim ry as integer
+    rx = int(rnd(1)*500)+400
+    ry = int(rnd(1)*500)+400
+    highres.getCell(rx, ry)->setFloorHeight(3000)
+    rx = int(rnd(1)*500)+400
+    ry = int(rnd(1)*500)+400
+    highres.getCell(rx, ry)->setFloorHeight(2000)
+    rx = int(rnd(1)*500)+400
+    ry = int(rnd(1)*500)+400
+    highres.getCell(rx, ry)->setFloorHeight(1000)
+    for y = -50 to 50
+        for x = -50 to 50
+            highres.getCell(rx+x, ry+y)->setFloorHeight(1500)
+        next x
+    next y
     
     '// glow boxes
     'dim rx as integer, ry as integer
