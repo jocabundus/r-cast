@@ -48,7 +48,7 @@ function GFont.writeText(text as string, x as integer, y as integer) as GFont pt
     dstRect.w = this._sprites_w: dstRect.h = this._sprites_h
     
     for n = 1 to len(text)
-        v = asc(mid$(text, n, 1))-32+this._sprite_offset
+        v = asc(mid(text, n, 1))-32+this._sprite_offset
         SDL_RenderCopy( *this._gfx_renderer, this._gfx_sprites, @this._sprites(v), @dstRect)
         dstRect.x += this._sprites_w
     next n
